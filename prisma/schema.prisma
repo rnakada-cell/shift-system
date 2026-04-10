@@ -1,0 +1,178 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Cast {
+  id                String           @id @default(cuid())
+  name              String
+  rank              String           @default("C") @map("cast_rank")
+  hourlyWage        Int
+  drinkBackRate     Float?           @default(0.0)
+  chekiBackRate     Float?           @default(0.0)
+  averageSales      Int
+  nominationRate    Float?           @default(0.0)
+  snsFollowers      Int?             @default(0)
+  absenceRate       Float?           @default(0.0)
+  floorPreference   String?          @default("ANY")
+  canOpen           Boolean?         @default(false)
+  canClose          Boolean?         @default(false)
+  isRookie          Boolean?         @default(false)
+  isManualWage      Boolean?         @default(false)
+  isManualBackRate  Boolean?         @default(false)
+  aiScore           Int?             @default(0)
+  preferredSegments String[]
+  createdAt         DateTime?        @default(now())
+  isUnderage       Boolean?         @default(false)
+  isLeader         Boolean?         @default(false)
+  updatedAt        DateTime?        @updatedAt
+  attendances       CastAttendance[]
+  castScores        CastScore[]
+}
+
+model Availability {
+  id          String    @id @default(cuid())
+  castId      String
+  date        String
+  startTime   String?
+  endTime     String?
+  targetFloor String?
+  segments    Json?
+  createdAt   DateTime? @default(now())
+  updatedAt   DateTime? @updatedAt
+  notes       String?
+
+  @@unique([castId, date])
+}
+
+model StoreSetting {
+  id                        String    @id @default("main-store")
+  name                      String
+  businessStart             String
+  businessEnd               String
+  defaultSegments           Json
+  scoreWeightHourlyRevenue  Float?    @default(0.4)
+  scoreWeightTotalRevenue   Float?    @default(0.3)
+  scoreWeightCustomerCount  Float?    @default(0.2)
+  scoreWeightAttendanceRate Float?    @default(0.1)
+  scorePeriodDays           Int?      @default(30)
+  rankDefaultWages          Json?
+  defaultCapacity           Json?
+  updatedAt                 DateTime? @updatedAt
+}
+
+model CastDailySales {
+  id         String    @id @default(cuid())
+  date       String
+  shopId     String
+  castName   String
+  totalSales Int?      @default(0)
+  drinkSales Int?      @default(0)
+  shotCount  Int?      @default(0)
+  chekiCount Int?      @default(0)
+  orishanPt  Int?      @default(0)
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+
+  @@unique([date, shopId, castName])
+  @@index([date])
+}
+
+model PosTransaction {
+  id         String    @id
+  closedAt   DateTime
+  shopId     String
+  castName   String
+  itemName   String
+  category   String
+  quantity   Int?      @default(1)
+  unitPrice  Int?      @default(0)
+  totalPrice Int?      @default(0)
+  createdAt  DateTime? @default(now())
+
+  @@index([closedAt])
+}
+
+model DailySummary {
+  id            String    @id @default(cuid())
+  date          String
+  shopId        String
+  salesInclTax  Int?      @default(0)
+  salesExclTax  Int?      @default(0)
+  customerCount Int?      @default(0)
+  avgUnitPrice  Int?      @default(0)
+  createdAt     DateTime? @default(now())
+  updatedAt     DateTime? @updatedAt
+
+  @@unique([date, shopId])
+  @@index([date])
+}
+
+model CastScore {
+  id              String    @id @default(cuid())
+  calculatedAt    DateTime? @default(now())
+  castId          String
+  periodDays      Int
+  hourlyRevenue   Float?    @default(0)
+  hourlyCustomers Float?    @default(0)
+  attendanceRate  Float?    @default(1.0)
+  score           Float?    @default(0)
+  granularRevenue Json?
+  cast            Cast      @relation(fields: [castId], references: [id], onDelete: Cascade)
+}
+
+model CastPairRule {
+  id        String    @id @default(cuid())
+  castNameA String
+  castNameB String
+  ruleType  String
+  penalty   Float?    @default(-1.0)
+  note      String?
+  isActive  Boolean?  @default(true)
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @updatedAt
+
+  @@unique([castNameA, castNameB, ruleType])
+}
+
+model Shift {
+  id        String    @id @default(cuid())
+  date      String
+  shopId    String
+  segmentId String
+  castId    String
+  floor     String?
+  note      String?
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @updatedAt
+}
+
+model CastAttendance {
+  id        String    @id @default(cuid())
+  castId    String
+  date      String
+  status    String
+  checkIn   String?
+  checkOut  String?
+  shopId    String?   @default("love_point")
+  createdAt DateTime? @default(now())
+  cast      Cast      @relation(fields: [castId], references: [id], onDelete: Cascade)
+
+  @@unique([castId, date])
+}
+
+model DailyDemographics {
+  id           String    @id @default(cuid())
+  date         String
+  shopId       String?   @default("love_point")
+  customerType String
+  count        Int?      @default(0)
+  totalSales   Int?      @default(0)
+  createdAt    DateTime? @default(now())
+
+  @@unique([date, shopId, customerType])
+}
