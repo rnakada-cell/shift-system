@@ -147,6 +147,10 @@ model Shift {
   castId    String
   floor     String?
   note      String?
+  isSwapRequested Boolean?   @default(false)
+  swapApplicantId String?
+  swapStatus      String?    @default("NONE") // NONE, REQUESTED, APPLIED, APPROVED
+  swapNote        String?
   createdAt DateTime? @default(now())
   updatedAt DateTime? @updatedAt
 }

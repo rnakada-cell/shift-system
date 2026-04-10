@@ -26,8 +26,9 @@ export default function CastInput() {
     const [message, setMessage] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [mounted, setMounted] = useState(false);
-    const [viewMode, setViewMode] = useState<"input" | "confirmed">("input");
+    const [viewMode, setViewMode] = useState<"input" | "confirmed" | "help">("input");
     const [confirmedShifts, setConfirmedShifts] = useState<any[]>([]);
+    const [helpRequests, setHelpRequests] = useState<any[]>([]);
 
     const VERSION = "v3.1.2-stabilized";
 
@@ -67,7 +68,6 @@ export default function CastInput() {
 
     const days = useMemo(() => getDaysInMonth(currentYear, currentMonth), [currentYear, currentMonth]);
 
-    // 確定シフトの読み込み
     useEffect(() => {
         if (!castId || viewMode !== "confirmed" || days.length === 0) return;
 
@@ -86,6 +86,24 @@ export default function CastInput() {
         };
         fetchConfirmed();
     }, [castId, viewMode, currentYear, currentMonth, days]);
+
+    // ヘルプ募集の読み込み
+    useEffect(() => {
+        if (viewMode !== "help") return;
+
+        const fetchHelpRequests = async () => {
+            try {
+                const res = await fetch('/api/shifts/swap');
+                const json = await res.json();
+                if (json.success) {
+                    setHelpRequests(json.data);
+                }
+            } catch (error) {
+                console.error("Failed to fetch help requests:", error);
+            }
+        };
+        fetchHelpRequests();
+    }, [viewMode]);
 
     // 既存の希望シフトの読み込み（同期用）
     useEffect(() => {
@@ -318,6 +336,12 @@ export default function CastInput() {
                             >
                                 確定確認
                             </button>
+                            <button
+                                onClick={() => setViewMode("help")}
+                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === "help" ? "bg-amber-600 text-white shadow-lg" : "text-gray-500 hover:text-gray-300"}`}
+                            >
+                                ヘルプ募集
+                            </button>
                         </div>
 
                         {viewMode === "input" && (
@@ -416,25 +440,116 @@ export default function CastInput() {
 
                                     {viewMode === "confirmed" ? (
                                         <div className="space-y-4">
-                                            <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3 block">確定済みシフト</label>
-                                            {confirmedShifts.filter(s => s.date === selectedDate).length > 0 ? (
-                                                confirmedShifts.filter(s => s.date === selectedDate).map((s, i) => {
-                                                    const seg = timeSegments.find(ts => ts.id === s.segmentId);
+                                            <div className="flex items-center justify-between">
+                                                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">確定済みシフト</label>
+                                                {confirmedShifts.filter(s => s.date === selectedDate).length > 0 && (
+                                                    <button
+                                                        onClick={async () => {
+                                                            const note = prompt("理由（任意）を入力してください:");
+                                                            const res = await fetch('/api/shifts/swap', {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ date: selectedDate, castId, isSwapRequested: true, note })
+                                                            });
+                                                            if (res.ok) {
+                                                                setMessage("交代募集（ヘルプ募集）を公開したよ！📢");
+                                                                // Refresh status
+                                                                setConfirmedShifts(prev => prev.map(s => s.date === selectedDate ? { ...s, isSwapRequested: true, swapStatus: 'REQUESTED' } : s));
+                                                            }
+                                                        }}
+                                                        className="text-[10px] bg-amber-600/20 border border-amber-500/50 text-amber-400 px-3 py-1 rounded-lg font-bold hover:bg-amber-600/40 transition-all"
+                                                    >
+                                                        交代募集をする
+                                                    </button>
+                                                )}
+                                            </div>
+                                            {confirmedShifts.filter(s => s.date === selectedDate).map((s, i) => {
+                                                const seg = timeSegments.find(ts => ts.id === s.segmentId);
+                                                return (
+                                                    <div key={i} className={`p-4 rounded-2xl border ${s.isSwapRequested ? 'bg-amber-900/10 border-amber-600/30' : 'bg-emerald-900/20 border-emerald-500/30'}`}>
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <span className={`${s.isSwapRequested ? 'text-amber-300' : 'text-emerald-300'} font-black`}>{seg?.label || s.segmentId}</span>
+                                                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${s.isSwapRequested ? 'bg-amber-500 text-amber-950' : 'bg-emerald-500 text-emerald-950'}`}>
+                                                                {s.isSwapRequested ? (s.swapStatus === 'APPLIED' ? 'Applied' : 'Swap Needed') : 'Confirmed'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="text-xs text-gray-400">
+                                                            配置フロア: <span className="text-white font-bold">{s.floor || "指定なし"}</span>
+                                                        </div>
+                                                        {s.isSwapRequested && s.swapStatus === 'APPLIED' && (
+                                                            <div className="mt-2 text-[10px] text-amber-400/70 italic italic">
+                                                                交代希望者が承認待ちです
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                            {confirmedShifts.filter(s => s.date === selectedDate).length === 0 && (
+                                                <div className="text-center py-10 opacity-40">
+                                                    <p className="text-xs font-bold uppercase tracking-widest">No segments assigned yet</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : viewMode === "help" ? (
+                                        <div className="space-y-4">
+                                            <label className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-3 block">ヘルプ募集中（交代希望）</label>
+                                            {helpRequests.length > 0 ? (
+                                                helpRequests.reduce((acc: any[], curr) => {
+                                                    const dateStr = curr.date;
+                                                    const existing = acc.find(a => a.date === dateStr && a.castId === curr.castId);
+                                                    if (existing) {
+                                                        existing.segments.push(curr);
+                                                    } else {
+                                                        acc.push({ date: dateStr, castId: curr.castId, note: curr.swapNote, segments: [curr], status: curr.swapStatus });
+                                                    }
+                                                    return acc;
+                                                }, []).map((req, i) => {
+                                                    const requester = systemCasts.find(c => c.id === req.castId);
+                                                    const isMe = req.castId === castId;
                                                     return (
-                                                        <div key={i} className="bg-emerald-900/20 border border-emerald-500/30 p-4 rounded-2xl">
-                                                            <div className="flex justify-between items-center mb-1">
-                                                                <span className="text-emerald-300 font-black">{seg?.label || s.segmentId}</span>
-                                                                <span className="text-[10px] bg-emerald-500 text-emerald-950 px-2 py-0.5 rounded-full font-bold uppercase">Confirmed</span>
+                                                        <div key={i} className="bg-gray-800/50 border border-gray-700 p-5 rounded-3xl relative overflow-hidden group">
+                                                            <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
+                                                            <div className="flex justify-between items-start mb-4">
+                                                                <div>
+                                                                    <div className="text-xs text-amber-500 font-black uppercase tracking-tighter mb-1">{req.date.replace(/-/g, '/')}</div>
+                                                                    <div className="text-lg font-black text-white">{requester?.name || "Unknown"} さん</div>
+                                                                </div>
+                                                                {!isMe && req.status !== 'APPLIED' && (
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            if (!castId) { setMessage("まずは名前を選んでね！"); return; }
+                                                                            const res = await fetch('/api/shifts/swap', {
+                                                                                method: 'PUT',
+                                                                                headers: { 'Content-Type': 'application/json' },
+                                                                                body: JSON.stringify({ date: req.date, originalCastId: req.castId, applicantId: castId })
+                                                                            });
+                                                                            if (res.ok) {
+                                                                                setMessage("交代申請を送信したよ！店長の承認を待ってね⏳");
+                                                                                setViewMode("help"); // Trigger refresh
+                                                                            }
+                                                                        }}
+                                                                        className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-black py-2 px-4 rounded-xl shadow-lg transition-all active:scale-95"
+                                                                    >
+                                                                        代わりに入る
+                                                                    </button>
+                                                                )}
+                                                                {req.status === 'APPLIED' && (
+                                                                    <span className="text-[10px] bg-gray-700 text-gray-400 px-3 py-1 rounded-full font-bold uppercase">申請済み(承認待ち)</span>
+                                                                )}
                                                             </div>
-                                                            <div className="text-xs text-gray-400">
-                                                                配置フロア: <span className="text-white font-bold">{s.floor || "指定なし"}</span>
+                                                            <div className="flex flex-wrap gap-2 mb-3">
+                                                                {req.segments.map((s: any, j: number) => {
+                                                                    const seg = timeSegments.find(ts => ts.id === s.segmentId);
+                                                                    return <span key={j} className="text-[10px] bg-gray-900 px-2 py-1 rounded border border-gray-700 text-gray-400">{seg?.label || s.segmentId}</span>
+                                                                })}
                                                             </div>
+                                                            {req.note && <div className="text-xs text-gray-400 italic">「{req.note}」</div>}
                                                         </div>
                                                     );
                                                 })
                                             ) : (
-                                                <div className="text-center py-10 opacity-40">
-                                                    <p className="text-xs font-bold uppercase tracking-widest">No segments<br />assigned yet</p>
+                                                <div className="text-center py-20 opacity-30">
+                                                    <p className="text-xs font-bold uppercase tracking-widest">現在ヘルプ募集はありません</p>
                                                 </div>
                                             )}
                                         </div>

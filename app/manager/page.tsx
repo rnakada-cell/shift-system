@@ -10,6 +10,7 @@ import DayCapacityModal from "../components/DayCapacityModal";
 import ShiftControlPanel from "../components/ShiftControlPanel";
 import ShiftResultView from "../components/ShiftResultView";
 import SettingsManagementTab from "../components/SettingsManagementTab";
+import SwapApprovalTab from "../components/SwapApprovalTab";
 
 const DEFAULT_WEIGHTS: OptimizationWeights = {
     revenueWeight: 1.0,
@@ -59,7 +60,7 @@ export default function ManagerDashboard() {
     const [uploadingCsv, setUploadingCsv] = useState(false);
     const [confirmedShiftEntries, setConfirmedShiftEntries] = useState<any[]>([]);
     const [confirmingShift, setConfirmingShift] = useState(false);
-    const [activeTab, setActiveTab] = useState<'shifts' | 'settings'>('shifts');
+    const [activeTab, setActiveTab] = useState<'shifts' | 'settings' | 'swaps'>('shifts');
     const [isCapacityModalOpen, setIsCapacityModalOpen] = useState(false);
     const [rankWages, setRankWages] = useState<Record<string, number>>({
         'S': 3000, 'A': 2500, 'B': 2000, 'C': 1500
@@ -344,9 +345,9 @@ export default function ManagerDashboard() {
 
                     <div className="xl:col-span-3 space-y-4">
                         <div className="flex border-b border-gray-800">
-                            {(['shifts', 'settings'] as const).map(tab => (
+                            {(['shifts', 'settings', 'swaps'] as const).map(tab => (
                                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-8 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === tab ? 'text-indigo-400 border-indigo-400 bg-indigo-400/5' : 'text-gray-500 hover:text-gray-300 border-transparent'}`}>
-                                    {tab === 'shifts' ? '📅 シフト管理' : '⚙️ マスタ設定・CSV'}
+                                    {tab === 'shifts' ? '📅 シフト管理' : tab === 'settings' ? '⚙️ マスタ設定・CSV' : '🔄 交代承認'}
                                 </button>
                             ))}
                         </div>
@@ -372,6 +373,9 @@ export default function ManagerDashboard() {
 
                         {activeTab === 'settings' && (
                             <SettingsManagementTab />
+                        )}
+                        {activeTab === 'swaps' && (
+                            <SwapApprovalTab />
                         )}
                     </div>
                 </div>
