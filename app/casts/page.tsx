@@ -12,6 +12,8 @@ export default function CastManagement() {
     const [statsCast, setStatsCast] = useState<any | null>(null);
     const [statsData, setStatsData] = useState<any>(null);
     const [loadingStats, setLoadingStats] = useState(false);
+    const [editingPairId, setEditingPairId] = useState<string | null>(null);
+    const [editingPairData, setEditingPairData] = useState<any>(null);
 
     const fetchData = async () => {
         const [castsRes, pairsRes] = await Promise.all([
@@ -107,12 +109,31 @@ export default function CastManagement() {
     };
 
     const handleDeletePair = async (id: string) => {
+        if (!confirm("このルールを削除しますか？")) return;
         const res = await fetch('/api/casts/pairs', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
         if (res.ok) fetchData();
+    };
+
+    const handleEditPair = (rule: any) => {
+        setEditingPairId(rule.id);
+        setEditingPairData({ ...rule });
+    };
+
+    const handleSavePairEdit = async () => {
+        if (!editingPairData) return;
+        const res = await fetch('/api/casts/pairs', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(editingPairData)
+        });
+        if (res.ok) {
+            setEditingPairId(null);
+            fetchData();
+        }
     };
 
     const handleViewStats = async (cast: any) => {
@@ -397,21 +418,58 @@ export default function CastManagement() {
                         {pairRules.length === 0 && <div className="col-span-full text-center py-10 text-gray-600 italic">ルールはまだありません</div>}
                         {pairRules.map(rule => (
                             <div key={rule.id} className="bg-gray-950 border border-gray-800 p-3 rounded-xl flex justify-between items-start group">
-                                <div className="space-y-1">
-                                    <div className="flex items-center gap-2">
-                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${rule.ruleType === 'ng' ? 'bg-rose-900/50 text-rose-400 border border-rose-800' : 'bg-emerald-900/50 text-emerald-400 border border-emerald-800'}`}>
-                                            {rule.ruleType}
-                                        </span>
-                                        <span className="text-xs font-bold text-gray-200">{rule.castNameA} & {rule.castNameB}</span>
+                                {editingPairId === rule.id ? (
+                                    <div className="w-full space-y-2">
+                                        <div className="flex gap-2">
+                                            <select
+                                                value={editingPairData.ruleType}
+                                                onChange={e => setEditingPairData({ ...editingPairData, ruleType: e.target.value })}
+                                                className="bg-gray-800 border-none rounded text-[10px] px-1 py-1 focus:ring-1 focus:ring-fuchsia-500"
+                                            >
+                                                <option value="ng">NG</option>
+                                                <option value="synergy">Synergy</option>
+                                            </select>
+                                            <span className="text-xs font-bold text-gray-400">{rule.castNameA} & {rule.castNameB}</span>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={editingPairData.note || ''}
+                                            onChange={e => setEditingPairData({ ...editingPairData, note: e.target.value })}
+                                            className="w-full bg-gray-800 border border-gray-700 rounded p-1 text-[10px] outline-none focus:ring-1 focus:ring-fuchsia-500"
+                                            placeholder="メモ"
+                                        />
+                                        <div className="flex justify-end gap-2">
+                                            <button onClick={() => setEditingPairId(null)} className="text-[10px] text-gray-500 hover:text-white uppercase font-bold">キャンセル</button>
+                                            <button onClick={handleSavePairEdit} className="text-[10px] text-fuchsia-400 hover:text-fuchsia-300 uppercase font-bold">保存</button>
+                                        </div>
                                     </div>
-                                    {rule.note && <p className="text-[10px] text-gray-500 leading-tight">{rule.note}</p>}
-                                </div>
-                                <button
-                                    onClick={() => handleDeletePair(rule.id)}
-                                    className="text-gray-700 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                                >
-                                    <span className="text-xl">×</span>
-                                </button>
+                                ) : (
+                                    <>
+                                        <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${rule.ruleType === 'ng' ? 'bg-rose-900/50 text-rose-400 border border-rose-800' : 'bg-emerald-900/50 text-emerald-400 border border-emerald-800'}`}>
+                                                    {rule.ruleType}
+                                                </span>
+                                                <span className="text-xs font-bold text-gray-200">{rule.castNameA} & {rule.castNameB}</span>
+                                            </div>
+                                            {rule.note && <p className="text-[10px] text-gray-500 leading-tight">{rule.note}</p>}
+                                        </div>
+                                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                                onClick={() => handleEditPair(rule)}
+                                                className="text-gray-500 hover:text-cyan-400 transition-colors"
+                                            >
+                                                <span className="text-xs">✎</span>
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeletePair(rule.id)}
+                                                className="text-gray-500 hover:text-rose-500 transition-colors"
+                                            >
+                                                <span className="text-xl leading-none">×</span>
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         ))}
                     </div>

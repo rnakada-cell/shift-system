@@ -73,3 +73,30 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+/** 更新 */
+export async function PATCH(req: NextRequest) {
+  try {
+    const { id, ruleType, penalty, note, castNameA, castNameB } = await req.json();
+
+    if (!id) {
+      return NextResponse.json({ error: 'Missing ID' }, { status: 400 });
+    }
+
+    const data: any = {};
+    if (ruleType) data.ruleType = ruleType;
+    if (penalty !== undefined) data.penalty = penalty;
+    if (note !== undefined) data.note = note;
+    if (castNameA) data.castNameA = castNameA;
+    if (castNameB) data.castNameB = castNameB;
+
+    const pair = await prisma.castPairRule.update({
+      where: { id },
+      data
+    });
+
+    return NextResponse.json({ success: true, data: pair });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
