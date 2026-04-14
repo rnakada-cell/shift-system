@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Zap } from "lucide-react";
 
 interface Settings {
   name: string;
@@ -13,6 +14,8 @@ interface Settings {
   scorePeriodDays: number;
   rankDefaultWages: Record<string, number>;
   defaultCapacity: { min1F: number; max1F: number; min2F: number; max2F: number };
+  lineChannelAccessToken: string;
+  lineChannelSecret: string;
 }
 
 export default function SettingsManagementTab() {
@@ -268,6 +271,55 @@ export default function SettingsManagementTab() {
               >
                 {syncingMaster ? '同期中...' : '🌐 POSCONEから履歴を同期'}
               </button>
+            </div>
+          </div>
+        </div>
+      </section>
+      {/* LINE 通知設定 (新規追加) */}
+      <section className="bg-[#111111]/60 border border-white/5 p-8 rounded-[32px] space-y-6 backdrop-blur-3xl shadow-2xl relative overflow-hidden group">
+        <div className="absolute -right-4 -top-4 w-24 h-24 bg-emerald-500/5 blur-[40px] rounded-full group-hover:bg-emerald-500/10 transition-all" />
+        
+        <div className="flex items-center gap-4">
+            <div className="p-3 bg-emerald-500/10 rounded-2xl">
+                <span className="text-xl">💬</span>
+            </div>
+            <div>
+                <h3 className="text-xl font-black italic italic tracking-tighter text-white">LINE 通知エンジン設定</h3>
+                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Messaging API 連携</p>
+            </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6">
+          <div className="space-y-4">
+            <div className="p-5 bg-emerald-500/5 border border-emerald-500/20 rounded-[24px]">
+                <h4 className="text-xs font-black text-emerald-400 mb-2 flex items-center gap-2">
+                    <Zap className="w-3 h-3" /> 通知の仕組みについて
+                </h4>
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                    キャスト固有の <span className="text-white font-bold">LINE ID</span> が登録されている場合、シフト交代の申請や承認時にシステムから自動的に通知が送信されます。
+                    通知内容はデータベースに記録された後、このAPIキーを使用してLINEのプッシュ通知へ変換されます。
+                </p>
+            </div>
+
+            <div className="space-y-4">
+                <div>
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 block">Channel Access Token</label>
+                    <input 
+                        type="password" 
+                        value={settings.lineChannelAccessToken || ''} 
+                        onChange={e => setSettings({...settings, lineChannelAccessToken: e.target.value})}
+                        className="w-full bg-[#050505] border border-white/5 rounded-2xl px-5 py-4 text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                    />
+                </div>
+                <div>
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 block">Channel Secret</label>
+                    <input 
+                        type="password" 
+                        value={settings.lineChannelSecret || ''} 
+                        onChange={e => setSettings({...settings, lineChannelSecret: e.target.value})}
+                        className="w-full bg-[#050505] border border-white/5 rounded-2xl px-5 py-4 text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                    />
+                </div>
             </div>
           </div>
         </div>

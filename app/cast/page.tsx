@@ -1,8 +1,22 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { PeriodAvailability, SegmentAvailability, Cast, TimeSegment } from "@/lib/optimizer";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+    Calendar as CalendarIcon, 
+    Sparkles, 
+    Trash2, 
+    Send, 
+    ChevronLeft, 
+    ChevronRight, 
+    LayoutGrid, 
+    CheckCircle, 
+    HelpCircle,
+    User
+} from "lucide-react";
+import { PeriodAvailability, Cast, TimeSegment } from "@/lib/optimizer";
 import { toLocalDateString } from "@/lib/utils";
+import NotificationBell from "@/app/components/NotificationBell";
 
 // カレンダー生成用ユーティリティ
 function getDaysInMonth(year: number, month: number) {
@@ -30,13 +44,13 @@ export default function CastInput() {
     const [confirmedShifts, setConfirmedShifts] = useState<any[]>([]);
     const [helpRequests, setHelpRequests] = useState<any[]>([]);
 
-    const VERSION = "v3.1.2-stabilized";
+    const VERSION = "v4.1.0-jp";
 
     useEffect(() => {
         setMounted(true);
     }, []);
 
-    // キャスト一覧の読み込み（DBから）
+    // キャスト一覧の読み込み
     useEffect(() => {
         const fetchData = async () => {
             try {
@@ -47,20 +61,11 @@ export default function CastInput() {
                 const castsJson = await castsRes.json();
                 const settingsJson = await settingsRes.json();
 
-                if (castsJson.success) {
-                    setSystemCasts(castsJson.data);
-                } else {
-                    setError("キャストの取得に失敗しました: " + (castsJson.error || "不明なエラー"));
-                }
-
-                if (settingsJson.success) {
-                    setTimeSegments(settingsJson.data.defaultSegments);
-                } else {
-                    setError("設定の取得に失敗しました: " + (settingsJson.error || "不明なエラー"));
-                }
+                if (castsJson.success) setSystemCasts(castsJson.data);
+                if (settingsJson.success) setTimeSegments(settingsJson.data.defaultSegments);
             } catch (error: any) {
                 console.error("Failed to fetch data:", error);
-                setError("通信エラーが発生しました: " + error.message);
+                setError("通信エラーが発生しました");
             }
         };
         fetchData();
@@ -68,6 +73,7 @@ export default function CastInput() {
 
     const days = useMemo(() => getDaysInMonth(currentYear, currentMonth), [currentYear, currentMonth]);
 
+    // 確定シフトの読み込み
     useEffect(() => {
         if (!castId || viewMode !== "confirmed" || days.length === 0) return;
 
@@ -77,9 +83,7 @@ export default function CastInput() {
                 const end = toLocalDateString(days[days.length - 1]);
                 const res = await fetch(`/api/shifts?castId=${castId}&startDate=${start}&endDate=${end}`);
                 const data = await res.json();
-                if (Array.isArray(data)) {
-                    setConfirmedShifts(data);
-                }
+                if (Array.isArray(data)) setConfirmedShifts(data);
             } catch (error) {
                 console.error("Failed to fetch confirmed shifts:", error);
             }
@@ -90,14 +94,11 @@ export default function CastInput() {
     // ヘルプ募集の読み込み
     useEffect(() => {
         if (viewMode !== "help") return;
-
         const fetchHelpRequests = async () => {
             try {
                 const res = await fetch('/api/shifts/swap');
                 const json = await res.json();
-                if (json.success) {
-                    setHelpRequests(json.data);
-                }
+                if (json.success) setHelpRequests(json.data);
             } catch (error) {
                 console.error("Failed to fetch help requests:", error);
             }
@@ -105,31 +106,22 @@ export default function CastInput() {
         fetchHelpRequests();
     }, [viewMode]);
 
-    // 既存の希望シフトの読み込み（同期用）
+    // 既存の希望シフトの読み込み
     useEffect(() => {
         if (!castId || days.length === 0) {
             setAvailability({});
             return;
         }
-
         const fetchAvailabilities = async () => {
             try {
                 const start = toLocalDateString(days[0]);
                 const end = toLocalDateString(days[days.length - 1]);
                 const res = await fetch(`/api/availabilities?castId=${castId}&startDate=${start}&endDate=${end}`);
                 const json = await res.json();
-                
                 if (json.success && Array.isArray(json.data)) {
                     const mapped: Record<string, PeriodAvailability> = {};
                     json.data.forEach((a: any) => {
-                        mapped[a.date] = {
-                            date: a.date,
-                            startTime: a.startTime || "12:00",
-                            endTime: a.endTime || "01:00",
-                            targetFloor: a.targetFloor || "ANY",
-                            segments: a.segments || [],
-                            notes: a.notes || ""
-                        };
+                        mapped[a.date] = { ...a, segments: a.segments || [] };
                     });
                     setAvailability(mapped);
                 } else {
@@ -143,517 +135,466 @@ export default function CastInput() {
         fetchAvailabilities();
     }, [castId, currentYear, currentMonth, days]);
 
-    const handleDateClick = (dateStr: string) => {
-        setSelectedDate(dateStr);
-    };
-
-    const updateDayAvailability = (date: string, data: Partial<PeriodAvailability>) => {
-        setAvailability(prev => {
-            const existing = prev[date] || { date, segments: [] };
-            return {
-                ...prev,
-                [date]: {
-                    ...existing,
-                    ...data
-                }
-            };
-        });
-    };
-
-    const toggleSegment = (date: string, segmentId: string) => {
-        setAvailability(prev => {
-            const day = prev[date] || { date, segments: [] };
-            const exists = day.segments.find(s => s.segmentId === segmentId);
-            const updatedSegments = exists
-                ? day.segments.filter(s => s.segmentId !== segmentId)
-                : [...day.segments, { segmentId }];
-            return { ...prev, [date]: { ...day, segments: updatedSegments } };
-        });
-    };
-
     const handleAIPredict = () => {
         if (!castId) {
             setMessage("まずは名前を選択してや！");
             return;
         }
-
-        // AI予測：今回は一時的にデモデータで予測（将来的にDB履歴から算出）
-        // const existing = JSON.parse(localStorage.getItem("castAvailabilities") || "[]");
-        // const history = existing.find((a: any) => a.castId === castId);
-        const history = null; // API連携中は一旦複雑化を避けるため簡易予測にする
-
         const newAvail: Record<string, PeriodAvailability> = { ...availability };
-
         days.forEach(d => {
             const dateStr = toLocalDateString(d);
             const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-
-            // 履歴があればその曜日と同じ設定を、なければデフォルトを適用
-            // API連携中は一旦複雑化を避けるため簡易予測にする
-            // const historyMatch = history?.availability?.find((h: any) => {
-            //     const hDate = new Date(h.date);
-            //     return hDate.getDay() === d.getDay();
-            // });
-            const historyMatch = null;
-
-            if (historyMatch) {
-                newAvail[dateStr] = {
-                    ...(historyMatch as any),
-                    date: dateStr // 日付だけ今月のものに差し替え
-                };
-            } else {
-                newAvail[dateStr] = {
-                    date: dateStr,
-                    startTime: "12:00",
-                    endTime: isWeekend ? "01:00" : "22:00",
-                    targetFloor: "ANY",
-                    segments: timeSegments.map(s => ({
-                        segmentId: s.id,
-                        hasCompanion: Math.random() > 0.85,
-                        hasDropIn: Math.random() > 0.95
-                    }))
-                };
-            }
+            newAvail[dateStr] = {
+                date: dateStr,
+                startTime: "12:00",
+                endTime: isWeekend ? "01:00" : "22:00",
+                targetFloor: "ANY",
+                segments: timeSegments.map(s => ({
+                    segmentId: s.id,
+                    hasCompanion: Math.random() > 0.85,
+                    hasDropIn: Math.random() > 0.95
+                }))
+            };
         });
-
         setAvailability(newAvail);
-        setMessage(history ? "過去の出勤パターンから予測したよ！" : "標準的な出勤パターンで予測したよ！");
+        setMessage("標準的な出勤パターンで予測したよ！✨");
     };
 
     const handleReset = async () => {
-        if (!castId) {
-            setMessage("まずは名前を選択してや！");
-            return;
-        }
-
-        if (!confirm(`${currentMonth + 1}月分の申請をすべて初期化（削除）してもええの？`)) {
-            return;
-        }
-
+        if (!castId) return setMessage("まずは名前を選択してや！");
+        if (!confirm("今月分の申請をリセットしてもいい？")) return;
         try {
-            const start = toLocalDateString(days[0]);
-            const end = toLocalDateString(days[days.length - 1]);
-            
             const res = await fetch('/api/availabilities/reset', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    castId,
-                    startDate: start,
-                    endDate: end
-                })
+                body: JSON.stringify({ castId, startDate: toLocalDateString(days[0]), endDate: toLocalDateString(days[days.length - 1]) })
             });
-
             if (res.ok) {
                 setAvailability({});
-                setMessage(`${currentMonth + 1}月分のデータを初期化したよ！🧹`);
-            } else {
-                setMessage("初期化に失敗しました。");
+                setMessage("リセット完了！🧹");
             }
-        } catch (error) {
-            console.error(error);
-            setMessage("通信エラーが発生しました。");
-        }
-
-        setTimeout(() => setMessage(""), 4000);
+        } catch (error) { setMessage("エラーが発生しました"); }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!castId) {
-            setMessage("名前を選んでや！");
-            return;
-        }
-
+    const handleSubmit = async () => {
+        if (!castId) return setMessage("名前を選んでや！");
         const periodAvailabilities = Object.values(availability).filter(a => a.segments.length > 0 || a.startTime);
-
-        if (periodAvailabilities.length === 0) {
-            setMessage("最低でも1日はシフトを入力してや！");
-            return;
-        }
-
         try {
             const res = await fetch('/api/availabilities', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    castId,
-                    availabilities: periodAvailabilities
-                })
+                body: JSON.stringify({ castId, availabilities: periodAvailabilities })
             });
-
-            if (res.ok) {
-                setMessage("1ヶ月分のシフト希望を送信したよ！🚀");
-            } else {
-                setMessage("送信に失敗しました。もう一度試してね🙏");
-            }
-        } catch (error) {
-            console.error(error);
-            setMessage("通信エラーが発生しました。");
-        }
-
-        setTimeout(() => setMessage(""), 4000);
+            if (res.ok) setMessage("送信完了！🚀");
+            else setMessage("送信失敗しました...");
+        } catch (error) { setMessage("通信エラーが発生しました"); }
     };
 
     return (
-        <div className="min-h-screen bg-[#050505] text-white p-6 font-sans selection:bg-purple-500/30">
-            <div className="max-w-6xl mx-auto">
-                <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
-                    <div>
-                        <h1 className="text-4xl font-black bg-gradient-to-br from-white to-gray-500 bg-clip-text text-transparent tracking-tighter">
-                            CAST CALENDAR
-                        </h1>
-                        <p className="text-gray-500 text-sm mt-1 uppercase tracking-widest font-bold">Shift Submission System {VERSION}</p>
-                        {error && (
-                            <div className="mt-2 text-red-500 text-xs bg-red-500/10 p-2 rounded border border-red-500/20">
-                                ⚠ {error}
+        <div className="min-h-screen bg-[#050505] text-[#FAFAFA] font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+            {/* Background Glows */}
+            <div className="fixed inset-0 overflow-hidden pointer-events-none">
+                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-500/10 blur-[120px] rounded-full" />
+                <div className="absolute bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-purple-500/10 blur-[120px] rounded-full" />
+            </div>
+
+            <div className="relative max-w-7xl mx-auto px-4 py-8 md:px-8">
+                {/* Header */}
+                <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-12">
+                    <motion.div 
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                    >
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 bg-indigo-600 rounded-xl shadow-lg shadow-indigo-600/20">
+                                <CalendarIcon className="w-6 h-6 text-white" />
                             </div>
-                        )}
-                    </div>
+                            <h1 className="text-3xl font-black tracking-tighter uppercase italic italic">
+                                キャストクラウド
+                            </h1>
+                        </div>
+                        <p className="text-gray-500 text-[10px] font-bold tracking-[0.2em] uppercase">シフト管理システム // {VERSION}</p>
+                    </motion.div>
 
-                    <div className="flex flex-wrap items-center gap-4">
-                        <select
-                            value={castId}
-                            onChange={e => setCastId(e.target.value)}
-                            className="bg-gray-900 border border-gray-800 text-white rounded-xl px-4 py-3 min-w-[200px] focus:ring-2 focus:ring-purple-500 outline-none transition-all shadow-lg"
-                        >
-                            <option value="">名前を選択...</option>
-                            {systemCasts.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                        </select>
-
-                        <div className="flex bg-gray-900/80 p-1 rounded-xl border border-gray-800">
-                            <button
-                                onClick={() => setViewMode("input")}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === "input" ? "bg-purple-600 text-white shadow-lg" : "text-gray-500 hover:text-gray-300"}`}
+                    <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex flex-wrap items-center gap-4"
+                    >
+                        {/* Selector */}
+                        <div className="relative group">
+                            <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-hover:text-indigo-400 transition-colors" />
+                            <select
+                                value={castId}
+                                onChange={e => setCastId(e.target.value)}
+                                className="bg-[#111111]/80 backdrop-blur-xl border border-white/5 text-white rounded-2xl pl-11 pr-10 py-4 min-w-[240px] focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-2xl appearance-none cursor-pointer hover:border-white/10"
                             >
-                                希望入力
-                            </button>
-                            <button
-                                onClick={() => setViewMode("confirmed")}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === "confirmed" ? "bg-emerald-600 text-white shadow-lg" : "text-gray-500 hover:text-gray-300"}`}
-                            >
-                                確定確認
-                            </button>
-                            <button
-                                onClick={() => setViewMode("help")}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === "help" ? "bg-amber-600 text-white shadow-lg" : "text-gray-500 hover:text-gray-300"}`}
-                            >
-                                ヘルプ募集
-                            </button>
+                                <option value="">名前を選択してください</option>
+                                {systemCasts.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                                <ChevronRight className="w-4 h-4 text-gray-500 rotate-90" />
+                            </div>
                         </div>
 
-                        {viewMode === "input" && (
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={handleAIPredict}
-                                    className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-xl transition-all active:scale-95 flex items-center gap-2 group"
-                                >
-                                    <span className="text-lg group-hover:rotate-12 transition-transform">✨</span>
-                                    AI 予測入力
-                                </button>
-                                <button
-                                    onClick={handleReset}
-                                    className="bg-gray-800 hover:bg-red-900/40 text-gray-400 hover:text-red-400 font-bold py-3 px-4 rounded-xl shadow-xl transition-all border border-gray-700 hover:border-red-500/50 flex items-center gap-2"
-                                    title="表示中の月を初期化"
-                                >
-                                    <span className="text-lg">🧹</span>
-                                    初期化
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                        {/* Notification Bell */}
+                        {castId && <NotificationBell userId={castId} />}
+                    </motion.div>
                 </header>
 
-                <div className="grid grid-cols-1 lg:grid-cols-7 gap-6">
-                    {/* カレンダー本体 */}
-                    <div className="lg:col-span-5 space-y-4">
-                        <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-3xl p-6 shadow-2xl">
-                            <div className="flex items-center justify-between mb-8">
-                                <h2 className="text-2xl font-bold">{currentYear}年 {currentMonth + 1}月</h2>
+                <main className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
+                    {/* Calendar Section */}
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="xl:col-span-8 space-y-8"
+                    >
+                        {/* View Toggles */}
+                        <div className="flex bg-[#111111]/60 p-1.5 rounded-2xl border border-white/5 backdrop-blur-3xl w-fit">
+                            {[
+                                { id: 'input', label: '希望入力', icon: <LayoutGrid className="w-4 h-4" /> },
+                                { id: 'confirmed', label: '確定確認', icon: <CheckCircle className="w-4 h-4" /> },
+                                { id: 'help', label: 'ヘルプ募集', icon: <HelpCircle className="w-4 h-4" /> }
+                            ].map((mode) => (
+                                <button
+                                    key={mode.id}
+                                    onClick={() => setViewMode(mode.id as any)}
+                                    className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-black transition-all ${viewMode === mode.id ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' : 'text-gray-500 hover:text-gray-300'}`}
+                                >
+                                    {mode.icon}
+                                    {mode.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="bg-[#0D0D0D]/80 backdrop-blur-3xl border border-white/5 rounded-[40px] p-8 shadow-2xl overflow-hidden relative group">
+                            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+                                <CalendarIcon className="w-64 h-64 -mr-20 -mt-20" />
+                            </div>
+
+                            <div className="relative flex items-center justify-between mb-12">
+                                <h2 className="text-4xl font-black italic italic tracking-tighter">
+                                    {currentMonth + 1} <span className="text-indigo-500">.</span> {currentYear}
+                                </h2>
                                 <div className="flex gap-2">
-                                    <button onClick={() => setCurrentMonth(m => m === 0 ? 11 : m - 1)} className="p-2 hover:bg-gray-800 rounded-lg transition-colors">←</button>
-                                    <button onClick={() => setCurrentMonth(m => m === 11 ? 0 : m + 1)} className="p-2 hover:bg-gray-800 rounded-lg transition-colors">→</button>
+                                    <button 
+                                        onClick={() => setCurrentMonth(m => (m === 0 ? 11 : m - 1))}
+                                        className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-colors"
+                                    >
+                                        <ChevronLeft className="w-5 h-5" />
+                                    </button>
+                                    <button 
+                                        onClick={() => setCurrentMonth(m => (m === 11 ? 0 : m + 1))}
+                                        className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-colors"
+                                    >
+                                        <ChevronRight className="w-5 h-5" />
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-7 gap-2">
-                                {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => (
-                                    <div key={d} className="text-center text-[10px] font-black text-gray-600 mb-2">{d}</div>
+                            <div className="grid grid-cols-7 gap-3 mb-4">
+                                {['日', '月', '火', '水', '木', '金', '土'].map(d => (
+                                    <div key={d} className="text-center text-[10px] font-black text-gray-600 tracking-widest">{d}</div>
                                 ))}
-                                {mounted && days.length > 0 && Array(days[0].getDay()).fill(0).map((_, i) => (
-                                    <div key={`empty-${i}`} className="aspect-square opacity-0"></div>
+                            </div>
+
+                            <div className="grid grid-cols-7 gap-3">
+                                {mounted && Array(days[0].getDay()).fill(0).map((_, i) => (
+                                    <div key={`empty-${i}`} className="aspect-square"></div>
                                 ))}
                                 {mounted && days.map(d => {
                                     const dateStr = toLocalDateString(d);
                                     const dayAvail = availability[dateStr];
                                     const isSelected = selectedDate === dateStr;
                                     const hasData = dayAvail && (dayAvail.segments.length > 0 || dayAvail.startTime);
-                                    
                                     const dayShifts = confirmedShifts.filter(s => s.date === dateStr);
                                     const isConfirmed = dayShifts.length > 0;
 
                                     return (
-                                        <button
+                                        <motion.button
+                                            whileHover={{ scale: 1.05 }}
+                                            whileTap={{ scale: 0.95 }}
                                             key={dateStr}
-                                            onClick={() => handleDateClick(dateStr)}
-                                            className={`relative aspect-square rounded-2xl border transition-all flex flex-col items-center justify-center gap-1 group
-                                                ${isSelected ? 'bg-purple-600 border-purple-400 scale-105 z-10 shadow-[0_0_30px_rgba(147,51,234,0.4)]' :
-                                                    viewMode === "confirmed" && isConfirmed ? 'bg-emerald-900/40 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.1)]' :
-                                                    hasData ? 'bg-gray-800/80 border-gray-600' : 'bg-gray-900/30 border-gray-800 hover:border-gray-600'}`}
+                                            onClick={() => setSelectedDate(dateStr)}
+                                            className={`relative aspect-square rounded-2xl border transition-all flex flex-col items-center justify-center p-2 group
+                                                ${isSelected ? 'bg-indigo-600 border-indigo-400 shadow-[0_0_30px_rgba(79,70,229,0.35)] z-10' :
+                                                  viewMode === "confirmed" && isConfirmed ? 'bg-emerald-500/10 border-emerald-500/30' :
+                                                  hasData ? 'bg-white/10 border-white/10' : 'bg-white/[0.02] border-white/5 hover:border-white/20'}`}
                                         >
-                                            <span className={`text-sm font-black ${isSelected ? 'text-white' : 'text-gray-400'}`}>{d.getDate()}</span>
-                                            {viewMode === "confirmed" && isConfirmed && !isSelected && (
-                                                <div className="flex gap-1">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                                                </div>
-                                            )}
-                                            {viewMode === "input" && hasData && !isSelected && (
-                                                <div className="flex gap-1">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></div>
-                                                    {dayAvail.segments.some(s => s.hasCompanion) && <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>}
-                                                </div>
-                                            )}
-                                        </button>
+                                            <span className={`text-base font-black italic italic ${isSelected ? 'text-white' : 'text-gray-400'}`}>{d.getDate()}</span>
+                                            
+                                            <div className="absolute bottom-3 flex gap-1">
+                                                {isConfirmed && viewMode === "confirmed" && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                                                {hasData && viewMode === "input" && <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 translate-y-[-2px]" />}
+                                            </div>
+                                        </motion.button>
                                     );
                                 })}
                             </div>
                         </div>
 
-                        {message && (
-                            <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-4 rounded-2xl text-center font-bold animate-fade-in">
-                                {message}
+                        {/* Quick Actions */}
+                        {viewMode === "input" && (
+                            <div className="flex flex-wrap gap-4">
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={handleAIPredict}
+                                    className="flex-1 min-w-[200px] bg-gradient-to-r from-indigo-600 to-indigo-500 p-6 rounded-3xl shadow-xl shadow-indigo-600/20 flex items-center justify-between group overflow-hidden relative"
+                                >
+                                    <div className="relative z-10 text-left">
+                                        <h3 className="text-lg font-black tracking-tighter italic italic">AI自動入力</h3>
+                                        <p className="text-indigo-200/60 text-[10px] font-bold uppercase tracking-wider">過去の傾向から自動で埋める</p>
+                                    </div>
+                                    <Sparkles className="w-8 h-8 text-white/20 group-hover:scale-125 group-hover:rotate-12 transition-transform relative z-10" />
+                                    <div className="absolute inset-0 bg-white/20 translate-y-[100%] group-hover:translate-y-0 transition-transform duration-500" />
+                                </motion.button>
+
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={handleReset}
+                                    className="px-8 bg-white/5 hover:bg-red-500/10 border border-white/5 hover:border-red-500/20 rounded-3xl transition-all group"
+                                >
+                                    <Trash2 className="w-6 h-6 text-gray-500 group-hover:text-red-500" />
+                                </motion.button>
                             </div>
                         )}
-                    </div>
+                    </motion.div>
 
-                    {/* 詳細設定パネル */}
-                    <div className="lg:col-span-2">
-                        <div className={`bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-2xl sticky top-6 transition-all duration-500 ${selectedDate ? 'opacity-100 translate-y-0' : 'opacity-30 blur-sm pointer-events-none translate-y-4'}`}>
+                    {/* Side Panel */}
+                    <div className="xl:col-span-4 h-full relative">
+                        <AnimatePresence mode="wait">
                             {selectedDate ? (
-                                <div className="space-y-6">
-                                    <div className="flex items-center justify-between">
-                                        <h3 className="text-xl font-black">{selectedDate.replace(/-/g, '/')}</h3>
-                                        <button onClick={() => setSelectedDate(null)} className="text-xs text-gray-500 hover:text-white uppercase font-bold tracking-widest">Close</button>
+                                <motion.div
+                                    key="detail"
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: 20 }}
+                                    className="bg-[#111111]/90 backdrop-blur-3xl border border-white/5 rounded-[40px] p-8 shadow-2xl sticky top-8"
+                                >
+                                    <div className="flex items-center justify-between mb-8">
+                                        <div>
+                                            <h3 className="text-3xl font-black italic italic tracking-tighter">{selectedDate.replace(/-/g, '.')}</h3>
+                                            <p className="text-gray-500 text-[10px] font-bold tracking-widest uppercase">詳細設定</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => setSelectedDate(null)}
+                                            className="p-2 bg-white/5 hover:bg-white/10 rounded-xl transition-colors"
+                                        >
+                                            <ChevronRight className="w-5 h-5 text-gray-500" />
+                                        </button>
                                     </div>
 
                                     {viewMode === "confirmed" ? (
-                                        <div className="space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block">確定済みシフト</label>
-                                                {confirmedShifts.filter(s => s.date === selectedDate).length > 0 && (
-                                                    <button
-                                                        onClick={async () => {
-                                                            const note = prompt("理由（任意）を入力してください:");
-                                                            const res = await fetch('/api/shifts/swap', {
-                                                                method: 'POST',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ date: selectedDate, castId, isSwapRequested: true, note })
-                                                            });
-                                                            if (res.ok) {
-                                                                setMessage("交代募集（ヘルプ募集）を公開したよ！📢");
-                                                                // Refresh status
-                                                                setConfirmedShifts(prev => prev.map(s => s.date === selectedDate ? { ...s, isSwapRequested: true, swapStatus: 'REQUESTED' } : s));
-                                                            }
-                                                        }}
-                                                        className="text-[10px] bg-amber-600/20 border border-amber-500/50 text-amber-400 px-3 py-1 rounded-lg font-bold hover:bg-amber-600/40 transition-all"
-                                                    >
-                                                        交代募集をする
-                                                    </button>
-                                                )}
-                                            </div>
-                                            {confirmedShifts.filter(s => s.date === selectedDate).map((s, i) => {
-                                                const seg = timeSegments.find(ts => ts.id === s.segmentId);
-                                                return (
-                                                    <div key={i} className={`p-4 rounded-2xl border ${s.isSwapRequested ? 'bg-amber-900/10 border-amber-600/30' : 'bg-emerald-900/20 border-emerald-500/30'}`}>
-                                                        <div className="flex justify-between items-center mb-1">
-                                                            <span className={`${s.isSwapRequested ? 'text-amber-300' : 'text-emerald-300'} font-black`}>{seg?.label || s.segmentId}</span>
-                                                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${s.isSwapRequested ? 'bg-amber-500 text-amber-950' : 'bg-emerald-500 text-emerald-950'}`}>
-                                                                {s.isSwapRequested ? (s.swapStatus === 'APPLIED' ? 'Applied' : 'Swap Needed') : 'Confirmed'}
+                                        <div className="space-y-6">
+                                            {confirmedShifts.filter(s => s.date === selectedDate).length > 0 ? (
+                                                confirmedShifts.filter(s => s.date === selectedDate).map((s, i) => (
+                                                    <div key={i} className="bg-white/[0.02] border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
+                                                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${s.isSwapRequested ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                                                        <div className="flex justify-between items-start mb-4">
+                                                            <h4 className="font-black italic italic text-lg">{timeSegments.find(ts => ts.id === s.segmentId)?.label || s.segmentId}</h4>
+                                                            <span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase ${s.isSwapRequested ? 'bg-amber-500 text-black' : 'bg-emerald-500 text-black'}`}>
+                                                                {s.isSwapRequested ? '交代募集中' : '確定済み'}
                                                             </span>
                                                         </div>
-                                                        <div className="text-xs text-gray-400">
-                                                            配置フロア: <span className="text-white font-bold">{s.floor || "指定なし"}</span>
-                                                        </div>
-                                                        {s.isSwapRequested && s.swapStatus === 'APPLIED' && (
-                                                            <div className="mt-2 text-[10px] text-amber-400/70 italic italic">
-                                                                交代希望者が承認待ちです
-                                                            </div>
+                                                        <p className="text-gray-500 text-xs font-bold uppercase mb-4">フロア: <span className="text-white">{s.floor || "指定なし"}</span></p>
+                                                        {!s.isSwapRequested && (
+                                                            <button 
+                                                                onClick={async () => {
+                                                                    const note = prompt("交代の理由を教えてください");
+                                                                    const res = await fetch('/api/shifts/swap', {
+                                                                        method: 'POST',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ date: selectedDate, castId, isSwapRequested: true, note })
+                                                                    });
+                                                                    if (res.ok) {
+                                                                        setMessage("ヘルプ募集を開始しました📢");
+                                                                        setConfirmedShifts(prev => prev.map(ps => ps.date === selectedDate ? { ...ps, isSwapRequested: true } : ps));
+                                                                    }
+                                                                }}
+                                                                className="w-full py-4 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-500 rounded-2xl text-xs font-black transition-all"
+                                                            >
+                                                                交代を募集する
+                                                            </button>
                                                         )}
                                                     </div>
-                                                );
-                                            })}
-                                            {confirmedShifts.filter(s => s.date === selectedDate).length === 0 && (
-                                                <div className="text-center py-10 opacity-40">
-                                                    <p className="text-xs font-bold uppercase tracking-widest">No segments assigned yet</p>
+                                                ))
+                                            ) : (
+                                                <div className="py-20 text-center opacity-20">
+                                                    <LayoutGrid className="w-16 h-16 mx-auto mb-4" />
+                                                    <p className="text-xs font-bold uppercase tracking-widest">勤務予定はありません</p>
                                                 </div>
                                             )}
                                         </div>
                                     ) : viewMode === "help" ? (
                                         <div className="space-y-4">
-                                            <label className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-3 block">ヘルプ募集中（交代希望）</label>
-                                            {helpRequests.length > 0 ? (
-                                                helpRequests.reduce((acc: any[], curr) => {
-                                                    const dateStr = curr.date;
-                                                    const existing = acc.find(a => a.date === dateStr && a.castId === curr.castId);
-                                                    if (existing) {
-                                                        existing.segments.push(curr);
-                                                    } else {
-                                                        acc.push({ date: dateStr, castId: curr.castId, note: curr.swapNote, segments: [curr], status: curr.swapStatus });
-                                                    }
-                                                    return acc;
-                                                }, []).map((req, i) => {
-                                                    const requester = systemCasts.find(c => c.id === req.castId);
-                                                    const isMe = req.castId === castId;
-                                                    return (
-                                                        <div key={i} className="bg-gray-800/50 border border-gray-700 p-5 rounded-3xl relative overflow-hidden group">
-                                                            <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
-                                                            <div className="flex justify-between items-start mb-4">
-                                                                <div>
-                                                                    <div className="text-xs text-amber-500 font-black uppercase tracking-tighter mb-1">{req.date.replace(/-/g, '/')}</div>
-                                                                    <div className="text-lg font-black text-white">{requester?.name || "Unknown"} さん</div>
-                                                                </div>
-                                                                {!isMe && req.status !== 'APPLIED' && (
-                                                                    <button
-                                                                        onClick={async () => {
-                                                                            if (!castId) { setMessage("まずは名前を選んでね！"); return; }
-                                                                            const res = await fetch('/api/shifts/swap', {
-                                                                                method: 'PUT',
-                                                                                headers: { 'Content-Type': 'application/json' },
-                                                                                body: JSON.stringify({ date: req.date, originalCastId: req.castId, applicantId: castId })
-                                                                            });
-                                                                            if (res.ok) {
-                                                                                setMessage("交代申請を送信したよ！店長の承認を待ってね⏳");
-                                                                                setViewMode("help"); // Trigger refresh
-                                                                            }
-                                                                        }}
-                                                                        className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-black py-2 px-4 rounded-xl shadow-lg transition-all active:scale-95"
-                                                                    >
-                                                                        代わりに入る
-                                                                    </button>
-                                                                )}
-                                                                {req.status === 'APPLIED' && (
-                                                                    <span className="text-[10px] bg-gray-700 text-gray-400 px-3 py-1 rounded-full font-bold uppercase">申請済み(承認待ち)</span>
-                                                                )}
+                                            {helpRequests.filter(r => r.date === selectedDate).length > 0 ? (
+                                                helpRequests.filter(r => r.date === selectedDate).map((req, i) => (
+                                                    <div key={i} className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl relative overflow-hidden">
+                                                        <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500" />
+                                                        <div className="flex justify-between items-start mb-4">
+                                                            <div>
+                                                                <p className="text-lg font-black italic italic">{systemCasts.find(c => c.id === req.castId)?.name || '誰か'}</p>
+                                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">交代希望</p>
                                                             </div>
-                                                            <div className="flex flex-wrap gap-2 mb-3">
-                                                                {req.segments.map((s: any, j: number) => {
-                                                                    const seg = timeSegments.find(ts => ts.id === s.segmentId);
-                                                                    return <span key={j} className="text-[10px] bg-gray-900 px-2 py-1 rounded border border-gray-700 text-gray-400">{seg?.label || s.segmentId}</span>
-                                                                })}
-                                                            </div>
-                                                            {req.note && <div className="text-xs text-gray-400 italic">「{req.note}」</div>}
+                                                            {req.castId !== castId && req.swapStatus !== 'APPLIED' && (
+                                                                <button
+                                                                    onClick={async () => {
+                                                                        const res = await fetch('/api/shifts/swap', {
+                                                                            method: 'PUT',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ date: req.date, originalCastId: req.castId, applicantId: castId })
+                                                                        });
+                                                                        if (res.ok) setMessage("立候補しました！店長の承認を待とう⏳");
+                                                                    }}
+                                                                    className="bg-white text-black text-[10px] font-black py-2 px-4 rounded-xl hover:bg-indigo-500 hover:text-white transition-colors"
+                                                                >
+                                                                    代わりに出る
+                                                                </button>
+                                                            )}
                                                         </div>
-                                                    );
-                                                })
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {helpRequests.filter(hr => hr.date === selectedDate && hr.castId === req.castId).map((s, si) => (
+                                                                <span key={si} className="text-[10px] bg-white/5 border border-white/5 px-2 py-1 rounded-lg text-gray-400">
+                                                                    {timeSegments.find(ts => ts.id === s.segmentId)?.label || s.segmentId}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))
                                             ) : (
-                                                <div className="text-center py-20 opacity-30">
-                                                    <p className="text-xs font-bold uppercase tracking-widest">現在ヘルプ募集はありません</p>
+                                                <div className="py-20 text-center opacity-20">
+                                                    <HelpCircle className="w-16 h-16 mx-auto mb-4" />
+                                                    <p className="text-xs font-bold uppercase tracking-widest">今日の募集はありません</p>
                                                 </div>
                                             )}
                                         </div>
                                     ) : (
-                                        <>
+                                        <div className="space-y-8">
                                             <div>
-                                                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3 block">自由時間設定 ＆ 一言メモ</label>
-                                                <div className="flex flex-col xl:flex-row items-start xl:items-center gap-3">
-                                                    <div className="flex items-center gap-2 w-full xl:w-auto">
-                                                        <select
-                                                            value={availability[selectedDate]?.startTime || "12:00"}
-                                                            onChange={e => updateDayAvailability(selectedDate, { startTime: e.target.value })}
-                                                            className="flex-1 xl:w-32 bg-gray-800 border border-gray-700 rounded-xl p-3 text-center text-lg font-bold outline-none focus:ring-2 focus:ring-purple-500 appearance-none cursor-pointer"
-                                                        >
-                                                            {[
-                                                                "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-                                                                "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", 
-                                                                "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30", 
-                                                                "00:00", "00:30", "01:00"
-                                                            ].map(t => <option key={t} value={t}>{t}</option>)}
-                                                        </select>
-                                                        <span className="text-gray-600">〜</span>
-                                                        <select
-                                                            value={availability[selectedDate]?.endTime || "01:00"}
-                                                            onChange={e => updateDayAvailability(selectedDate, { endTime: e.target.value })}
-                                                            className="flex-1 xl:w-32 bg-gray-800 border border-gray-700 rounded-xl p-3 text-center text-lg font-bold outline-none focus:ring-2 focus:ring-purple-500 appearance-none cursor-pointer"
-                                                        >
-                                                            {[
-                                                                "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-                                                                "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", 
-                                                                "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30", 
-                                                                "00:00", "00:30", "01:00"
-                                                            ].map(t => <option key={t} value={t}>{t}</option>)}
-                                                        </select>
-                                                    </div>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="一言（来客予定など）"
-                                                        value={availability[selectedDate]?.notes || ""}
-                                                        onChange={e => updateDayAvailability(selectedDate, { notes: e.target.value })}
-                                                        className="w-full xl:flex-1 bg-gray-800 border border-gray-700 rounded-xl p-3 text-sm outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-600"
-                                                    />
+                                                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 block">出勤可能時間</label>
+                                                <div className="flex items-center gap-4">
+                                                    <select
+                                                        value={availability[selectedDate]?.startTime || "12:00"}
+                                                        onChange={e => setAvailability(prev => ({ ...prev, [selectedDate]: { ...(prev[selectedDate] || { date: selectedDate, segments: [] }), startTime: e.target.value } }))}
+                                                        className="flex-1 bg-white/5 border border-white/5 rounded-2xl p-4 font-black italic italic text-xl outline-none appearance-none text-center"
+                                                    >
+                                                        {Array.from({ length: 27 }, (_, i) => {
+                                                            const h = Math.floor(i / 2) + 12;
+                                                            const m = i % 2 === 0 ? "00" : "30";
+                                                            const time = `${h > 24 ? String(h-24).padStart(2,'0') : String(h).padStart(2,'0')}:${m}`;
+                                                            return <option key={time} value={time}>{time}</option>;
+                                                        })}
+                                                    </select>
+                                                    <span className="text-white/20 font-black">~</span>
+                                                    <select
+                                                        value={availability[selectedDate]?.endTime || "01:00"}
+                                                        onChange={e => setAvailability(prev => ({ ...prev, [selectedDate]: { ...(prev[selectedDate] || { date: selectedDate, segments: [] }), endTime: e.target.value } }))}
+                                                        className="flex-1 bg-white/5 border border-white/5 rounded-2xl p-4 font-black italic italic text-xl outline-none appearance-none text-center"
+                                                    >
+                                                        {Array.from({ length: 27 }, (_, i) => {
+                                                            const h = Math.floor(i / 2) + 12;
+                                                            const m = i % 2 === 0 ? "00" : "30";
+                                                            const time = `${h >= 24 ? String(h-24).padStart(2,'0') : String(h).padStart(2,'0')}:${m}`;
+                                                            return <option key={time} value={time}>{time}</option>;
+                                                        })}
+                                                    </select>
                                                 </div>
                                             </div>
 
-                                    <div className="pt-1">
-                                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3 block">希望フロア</label>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <button
-                                                onClick={() => updateDayAvailability(selectedDate, { targetFloor: '1F' })}
-                                                className={`p-3 rounded-xl border text-sm font-black transition-all flex items-center justify-center gap-2 ${availability[selectedDate]?.targetFloor === '1F' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:border-gray-500'}`}
-                                            >
-                                                1F
-                                            </button>
-                                            <button
-                                                onClick={() => updateDayAvailability(selectedDate, { targetFloor: '2F' })}
-                                                className={`p-3 rounded-xl border text-sm font-black transition-all flex items-center justify-center gap-2 ${availability[selectedDate]?.targetFloor === '2F' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:border-gray-500'}`}
-                                            >
-                                                2F
-                                            </button>
-                                            <button
-                                                onClick={() => updateDayAvailability(selectedDate, { targetFloor: 'ANY' })}
-                                                className={`p-3 rounded-xl border text-sm font-black transition-all flex items-center justify-center gap-2 ${(!availability[selectedDate]?.targetFloor || availability[selectedDate]?.targetFloor === 'ANY') ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'bg-gray-800/50 border-gray-700 text-gray-400 hover:border-gray-500'}`}
-                                            >
-                                                どちらでも
-                                            </button>
+                                            <div>
+                                                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 block">希望フロア</label>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    {[
+                                                        { id: '1F', label: '1F フロア' },
+                                                        { id: '2F', label: '2F カウンター' },
+                                                        { id: 'ANY', label: 'どこでも' }
+                                                    ].map(floor => (
+                                                        <button
+                                                            key={floor.id}
+                                                            onClick={() => setAvailability(prev => ({ ...prev, [selectedDate]: { ...(prev[selectedDate] || { date: selectedDate, segments: [] }), targetFloor: floor.id } }))}
+                                                            className={`p-4 rounded-2xl border transition-all text-xs font-black uppercase ${ (availability[selectedDate]?.targetFloor || 'ANY') === floor.id ? 'bg-white text-black border-white' : 'bg-white/[0.02] border-white/5 text-gray-500 hover:text-white'}`}
+                                                        >
+                                                            {floor.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="pt-4 border-t border-white/5">
+                                                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 block">備考</label>
+                                                <textarea 
+                                                    value={availability[selectedDate]?.notes || ""}
+                                                    onChange={e => setAvailability(prev => ({ ...prev, [selectedDate]: { ...(prev[selectedDate] || { date: selectedDate, segments: [] }), notes: e.target.value } }))}
+                                                    placeholder="伝えたいことがあれば..."
+                                                    className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-sm font-medium outline-none focus:border-indigo-500/50 min-h-[100px] resize-none"
+                                                />
+                                            </div>
                                         </div>
-                                    </div>
-
-
-                                        </>
                                     )}
-                                </div>
+                                </motion.div>
                             ) : (
-                                <div className="h-[400px] flex flex-col items-center justify-center text-center opacity-40">
-                                    <div className="text-6xl mb-4">📅</div>
-                                    <p className="text-sm font-bold uppercase tracking-widest text-gray-500">Select a date<br />to start editing</p>
-                                </div>
+                                <motion.div
+                                    key="none"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="h-[600px] flex flex-col items-center justify-center text-center opacity-10 pointer-events-none"
+                                >
+                                    <CalendarIcon className="w-32 h-32 mb-8" />
+                                    <p className="text-xl font-black italic italic tracking-tighter uppercase underline decoration-indigo-500 underline-offset-8">日付を選択して入力</p>
+                                </motion.div>
                             )}
-                        </div>
+                        </AnimatePresence>
                     </div>
-                </div>
+                </main>
 
-                {viewMode === "input" && (
-                    <div className="mt-12 flex justify-center">
-                        <button
-                            onClick={handleSubmit}
-                            disabled={!castId}
-                            className="bg-white hover:bg-gray-200 text-black font-black py-5 px-16 rounded-full text-xl shadow-[0_0_50px_rgba(255,255,255,0.2)] transition-all active:scale-95 disabled:opacity-20 flex items-center gap-4"
+                {/* Footer Fixed Submit */}
+                <motion.div 
+                    initial={{ y: 100 }}
+                    animate={{ y: 0 }}
+                    className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4"
+                >
+                    <button
+                        onClick={handleSubmit}
+                        disabled={!castId}
+                        className="w-full bg-white text-black font-black italic italic py-6 px-12 rounded-[30px] shadow-[0_20px_60px_-15px_rgba(255,255,255,0.3)] hover:shadow-[0_25px_70px_-15px_rgba(255,255,255,0.4)] transition-all active:scale-95 disabled:opacity-20 flex items-center justify-center gap-4 group"
+                    >
+                        <span className="text-xl">希望を送信する</span>
+                        <Send className="w-6 h-6 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                    </button>
+                </motion.div>
+
+                {/* Toast Messages */}
+                <AnimatePresence>
+                    {message && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 50 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[60] bg-white/90 backdrop-blur-xl text-black px-8 py-4 rounded-2xl shadow-2xl font-black italic italic tracking-tight"
                         >
-                            <span>SEND ALL DATA</span>
-                            <span className="text-2xl">🚀</span>
-                        </button>
-                    </div>
-                )}
+                            {message}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
 
             <style jsx global>{`
-                @keyframes fade-in {
-                    from { opacity: 0; transform: translateY(10px); }
-                    to { opacity: 1; transform: translateY(0); }
+                .custom-scrollbar::-webkit-scrollbar {
+                    width: 4px;
                 }
-                .animate-fade-in {
-                    animation: fade-in 0.3s ease-out forwards;
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 10px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: rgba(255, 255, 255, 0.2);
                 }
             `}</style>
         </div>

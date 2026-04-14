@@ -20,6 +20,8 @@ export async function GET() {
             scoreWeightAttendanceRate: settings.scoreWeightAttendanceRate ?? 0.1,
             scorePeriodDays: settings.scorePeriodDays ?? 30,
             defaultCapacity: settings.defaultCapacity || { min1F: 5, max1F: 6, min2F: 3, max2F: 4 },
+            lineChannelAccessToken: settings.lineChannelAccessToken || '',
+            lineChannelSecret: settings.lineChannelSecret || '',
         };
 
         return NextResponse.json({ success: true, data: safeSettings });
@@ -51,6 +53,8 @@ export async function POST(request: Request) {
                 scorePeriodDays: body.scorePeriodDays,
                 rankDefaultWages: body.rankDefaultWages,
                 defaultCapacity: body.defaultCapacity,
+                lineChannelAccessToken: body.lineChannelAccessToken,
+                lineChannelSecret: body.lineChannelSecret,
             },
             create: {
                 id: 'main-store',
@@ -65,6 +69,8 @@ export async function POST(request: Request) {
                 scorePeriodDays: body.scorePeriodDays ?? 30,
                 rankDefaultWages: body.rankDefaultWages || { "S": 3500, "A": 3000, "B": 2500, "C": 2000 },
                 defaultCapacity: body.defaultCapacity || { min1F: 5, max1F: 6, min2F: 3, max2F: 4 },
+                lineChannelAccessToken: body.lineChannelAccessToken || '',
+                lineChannelSecret: body.lineChannelSecret || '',
             },
         });
         return NextResponse.json({ success: true, data: settings });

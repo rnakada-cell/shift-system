@@ -58,6 +58,11 @@ export async function POST(req: NextRequest) {
             }
         });
 
+        // Notify Manager if requested
+        if (isSwapRequested) {
+            notifySwapAction('MANAGER', { action: 'REQUESTED', date, castId });
+        }
+
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error('Swap request error:', error);
@@ -86,6 +91,30 @@ export async function PUT(req: NextRequest) {
                 swapApplicantId: applicantId,
                 swapStatus: 'APPLIED'
             }
+        });
+
+        // Notify Original Cast and Manager via LINE
+        notifySwapAction('MANAGER', { action: 'APPLIED', date, castId: applicantId, originalCastId });
+        notifySwapAction(originalCastId, { action: 'APPLIED_TO_YOU', date, castId: applicantId });
+
+        // Notify Original Cast and Manager (DB notification)
+        await prisma.notification.createMany({
+            data: [
+                {
+                    userId: originalCastId,
+                    type: 'SWAP_APPLIED',
+                    title: '交代申請が届きました',
+                    message: `${date}のシフトにヘルプの立候補がありました。承認をお待ちください。`,
+                    link: '/cast'
+                },
+                {
+                    userId: 'manager',
+                    type: 'SWAP_APPLIED',
+                    title: '交代の承認待ち',
+                    message: `${date}のシフト交代申請（${originalCastId} → ${applicantId}）の承認待ちです。`,
+                    link: '/manager'
+                }
+            ]
         });
 
         return NextResponse.json({ success: true });
@@ -123,6 +152,26 @@ export async function PATCH(req: NextRequest) {
                     }
                 });
             });
+
+            // Notify both parties of approval
+            await prisma.notification.createMany({
+                data: [
+                    {
+                        userId: originalCastId,
+                        type: 'SWAP_APPROVED',
+                        title: '交代が承認されました',
+                        message: `${date}のシフト交代が完了しました。`,
+                        link: '/cast'
+                    },
+                    {
+                        userId: applicantId,
+                        type: 'SWAP_APPROVED',
+                        title: '交代が承認されました',
+                        message: `${date}のシフトをあなたが担当することになりました。`,
+                        link: '/cast'
+                    }
+                ]
+            });
         } else {
             // Reject - back to REQUESTED status
             await prisma.shift.updateMany({
@@ -137,11 +186,67 @@ export async function PATCH(req: NextRequest) {
                     swapStatus: 'REQUESTED'
                 }
             });
+
+            // Notify Applicant of rejection
+            await prisma.notification.create({
+                data: {
+                    userId: applicantId,
+                    type: 'SWAP_REJECTED',
+                    title: '交代申請が却下されました',
+                    message: `${date}の交代申請は管理者により却下されました。`,
+                    link: '/cast'
+                }
+            });
+        }
+
+        // Notify parties via LINE
+        if (action === 'APPROVE') {
+            notifySwapAction(originalCastId, { action: 'APPROVED', date });
+            notifySwapAction(applicantId, { action: 'APPROVED', date });
+        } else {
+            notifySwapAction(applicantId, { action: 'REJECTED', date });
         }
 
         return NextResponse.json({ success: true });
     } catch (error: any) {
         console.error('Swap approval error:', error);
         return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
+/**
+ * SIDE EFFECTS: LINE Notifications
+ */
+async function notifySwapAction(targetId: string, data: any) {
+    try {
+        const { sendLineNotification, LINE_TEMPLATES } = await import('@/lib/line');
+        const { date, castId, applicantId, originalCastId, action } = data;
+
+        // Fetch names for templates
+        const getCastName = async (id: string) => {
+            const c = await prisma.cast.findUnique({ where: { id } });
+            return c?.name || id;
+        };
+
+        let message = '';
+        if (action === 'REQUESTED') {
+            const name = await getCastName(castId);
+            message = LINE_TEMPLATES.SWAP_REQUESTED(name, date);
+        } else if (action === 'APPLIED') {
+            const name = await getCastName(castId); // applicant
+            message = LINE_TEMPLATES.SWAP_APPLIED(name, date);
+        } else if (action === 'APPLIED_TO_YOU') {
+            message = `【ヘルプ立候補】${date}のあなたのシフトにヘルプの立候補がありました。`;
+        } else if (action === 'APPROVED') {
+            message = LINE_TEMPLATES.SWAP_APPROVED(date);
+        } else if (action === 'REJECTED') {
+            message = `【交代申請】${date}の交代申請が管理者により却下されました。`;
+        }
+
+        if (message) {
+            await sendLineNotification(targetId === 'MANAGER' ? 'manager' : targetId, message);
+        }
+    } catch (e) {
+        console.error('Swap notification error:', e);
     }
 }

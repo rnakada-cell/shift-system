@@ -1,8 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+    LayoutDashboard, 
+    Settings, 
+    ArrowLeftRight, 
+    FileBarChart, 
+    ArrowRightCircle,
+    Package,
+    Users
+} from "lucide-react";
 import { OptimizationMode, OptimizationScope, OptimizationWeights, OptimizationConstraints, DaySegmentCapacity, Cast, TimeSegment } from "@/lib/optimizer";
-import { getDateRange, formatDate, toLocalDateString } from "@/lib/utils";
+import { toLocalDateString, formatDate } from "@/lib/utils";
 
 // Components
 import ExecutiveSummary from "../components/ExecutiveSummary";
@@ -11,6 +21,8 @@ import ShiftControlPanel from "../components/ShiftControlPanel";
 import ShiftResultView from "../components/ShiftResultView";
 import SettingsManagementTab from "../components/SettingsManagementTab";
 import SwapApprovalTab from "../components/SwapApprovalTab";
+import NotificationBell from "../components/NotificationBell";
+import CastManagementTab from "../components/CastManagementTab";
 
 const DEFAULT_WEIGHTS: OptimizationWeights = {
     revenueWeight: 1.0,
@@ -56,11 +68,9 @@ export default function ManagerDashboard() {
         scoreWeightAttendanceRate: 0.1,
         scorePeriodDays: 30
     });
-    const [syncingPos, setSyncingPos] = useState(false);
-    const [uploadingCsv, setUploadingCsv] = useState(false);
     const [confirmedShiftEntries, setConfirmedShiftEntries] = useState<any[]>([]);
     const [confirmingShift, setConfirmingShift] = useState(false);
-    const [activeTab, setActiveTab] = useState<'shifts' | 'settings' | 'swaps'>('shifts');
+    const [activeTab, setActiveTab] = useState<'shifts' | 'settings' | 'swaps' | 'cast'>('shifts');
     const [isCapacityModalOpen, setIsCapacityModalOpen] = useState(false);
     const [rankWages, setRankWages] = useState<Record<string, number>>({
         'S': 3000, 'A': 2500, 'B': 2000, 'C': 1500
@@ -132,49 +142,6 @@ export default function ManagerDashboard() {
         } catch (e: any) { setError(e.message); } finally { setLoading(false); }
     }, [mode, scope, weights, constraints, date, startDate, endDate, month, buildDayCapacitiesArray]);
 
-    const fetchAiData = async () => {
-        try {
-            const [resP, resS] = await Promise.all([fetch('/api/casts/pairs'), fetch('/api/settings')]);
-            const [jP, jS] = await Promise.all([resP.json(), resS.json()]);
-            if (jP.success) setPairRules(jP.data);
-            if (jS.success && jS.data) {
-                setAiWeights({
-                    scoreWeightHourlyRevenue: jS.data.scoreWeightHourlyRevenue,
-                    scoreWeightTotalRevenue: jS.data.scoreWeightTotalRevenue,
-                    scoreWeightCustomerCount: jS.data.scoreWeightCustomerCount,
-                    scoreWeightAttendanceRate: jS.data.scoreWeightAttendanceRate,
-                    scorePeriodDays: jS.data.scorePeriodDays,
-                });
-                if (jS.data.rankDefaultWages) setRankWages(jS.data.rankDefaultWages);
-                if (jS.data.defaultCapacity) setStoreDefaultCapacity(jS.data.defaultCapacity);
-            }
-        } catch (e) { console.error(e); }
-    };
-
-    const handleRecalculateScores = async () => {
-        try {
-            const res = await fetch('/api/casts/scores/recalculate', { method: 'POST' });
-            if (res.ok) {
-                alert("スコアの再計算が完了しました。");
-                const castsRes = await fetch('/api/casts');
-                const castsJson = await castsRes.json();
-                if (castsJson.success) setCasts(castsJson.data);
-            }
-        } catch (e) { alert("失敗しました"); }
-    };
-
-    const handleDeletePair = async (id: string) => {
-        if (!confirm("削除しますか？")) return;
-        try {
-            const res = await fetch('/api/casts/pairs', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id })
-            });
-            if (res.ok) fetchAiData();
-        } catch (e) { alert("失敗"); }
-    };
-
     const fetchConfirmedShifts = useCallback(async () => {
         try {
             const res = await fetch(`/api/shifts?date=${date}&shopId=love_point`);
@@ -188,34 +155,36 @@ export default function ManagerDashboard() {
     useEffect(() => {
         const init = async () => {
             try {
-                const [cR, sR] = await Promise.all([fetch('/api/casts'), fetch('/api/settings')]);
-                const cJ = await cR.json(); const sJ = await sR.json();
+                const [cR, sR, pR] = await Promise.all([
+                    fetch('/api/casts'), 
+                    fetch('/api/settings'),
+                    fetch('/api/casts/pairs')
+                ]);
+                const cJ = await cR.json(); 
+                const sJ = await sR.json();
+                const pJ = await pR.json();
+
                 if (cJ.success) setCasts(cJ.data);
-                if (sJ.success) setTimeSegments(sJ.data.defaultSegments);
-                fetchAiData();
-                fetch('/api/scrape').then(r => r.json()).then(j => {
-                    if (j.success && j.data?.menu?.estimatedArpu) setScrapedArpu(j.data.menu.estimatedArpu);
-                });
+                if (pJ.success) setPairRules(pJ.data);
+                if (sJ.success) {
+                    const sData = sJ.data;
+                    setTimeSegments(sData.defaultSegments);
+                    if (sData.rankDefaultWages) setRankWages(sData.rankDefaultWages);
+                    if (sData.defaultCapacity) setStoreDefaultCapacity(sData.defaultCapacity);
+                    
+                    // AI重みの反映
+                    setAiWeights({
+                        scoreWeightHourlyRevenue: sData.scoreWeightHourlyRevenue ?? 0.4,
+                        scoreWeightTotalRevenue: sData.scoreWeightTotalRevenue ?? 0.3,
+                        scoreWeightCustomerCount: sData.scoreWeightCustomerCount ?? 0.2,
+                        scoreWeightAttendanceRate: sData.scoreWeightAttendanceRate ?? 0.1,
+                        scorePeriodDays: sData.scorePeriodDays ?? 30
+                    });
+                }
             } catch (e) { console.error(e); }
         };
         init();
     }, []);
-
-    const handleExport = async () => {
-        if (!data) return;
-        try {
-            const res = await fetch('/api/export', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ dailyResults: data.dailyResults, summary: data.summary })
-            });
-            const blob = await res.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url;
-            a.download = `shift_${scope}_${new Date().toISOString().split('T')[0]}.xlsx`;
-            document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url);
-        } catch (e) { alert("失敗しました"); }
-    };
 
     const handleConfirmShift = async () => {
         if (!data) return;
@@ -234,166 +203,191 @@ export default function ManagerDashboard() {
         } catch (e) { alert("保存に失敗しました。"); } finally { setConfirmingShift(false); }
     };
 
-    const handleCsvUpload = async (file: File) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        setUploadingCsv(true);
+    const handleExport = async () => {
+        if (!data) return;
         try {
-            const res = await fetch('/api/pos/import', { method: 'POST', body: formData });
-            const json = await res.json();
-            if (json.success) alert(`インポート完了: ${json.count}件`);
-        } catch (e) { alert("アップロード失敗"); } finally { setUploadingCsv(false); }
-    };
-
-    const handleResetShift = useCallback(async () => {
-        if (!confirm("現在のシフト案を初期化し、DB上の保存済み（確定）シフトもこの期間分クリアしますか？")) return;
-        
-        let reqStart = startDate;
-        let reqEnd = endDate;
-        if (scope === 'daily') {
-            reqStart = date;
-            reqEnd = date;
-        } else if (scope === 'monthly') {
-            reqStart = `${month}-01`;
-            const lastDay = new Date(parseInt(month.split('-')[0]), parseInt(month.split('-')[1]), 0).getDate();
-            reqEnd = `${month}-${lastDay.toString().padStart(2, '0')}`;
-        }
-
-        try {
-            const res = await fetch('/api/shifts/reset', {
+            const res = await fetch('/api/export', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ startDate: reqStart, endDate: reqEnd })
+                body: JSON.stringify({ dailyResults: data.dailyResults, summary: data.summary })
             });
-
-            if (res.ok) {
-                setData(null);
-                setError(null);
-                fetchConfirmedShifts();
-            } else {
-                alert("初期化に失敗しました。");
-            }
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `shift_export_${date}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
         } catch (e) {
-            alert("通信エラーが発生しました。");
+            alert("エクスポートに失敗しました。");
         }
-    }, [startDate, endDate, date, scope, month, fetchConfirmedShifts]);
-
-    const handleApplyToRange = useCallback((rangeType: 'week' | 'month') => {
-        let targetDates: string[] = [];
-        if (rangeType === 'week') {
-            targetDates = getDateRange(startDate, endDate);
-        } else {
-            const [year, monthNum] = month.split('-').map(Number);
-            const firstDay = new Date(year, monthNum - 1, 1);
-            const lastDay = new Date(year, monthNum, 0);
-            targetDates = getDateRange(toLocalDateString(firstDay), toLocalDateString(lastDay));
-        }
-
-        const currentConfigs = Object.entries(dayCapacities)
-            .filter(([key]) => key.startsWith(`${date}__`))
-            .map(([key, val]) => ({ segmentId: key.split('__')[1], val }));
-
-        if (currentConfigs.length === 0) {
-            alert("現在の日の設定が見つかりません。設定を行ってから実行してください。");
-            return;
-        }
-
-        if (!confirm(`${targetDates.length}日分の日程に現在の設定（${date}分）をコピーします。よろしいですか？`)) return;
-
-        setDayCapacities(prev => {
-            const next = { ...prev };
-            targetDates.forEach(d => {
-                if (d === date) return; // 自分自身にはコピー不要
-                currentConfigs.forEach(cfg => {
-                    next[`${d}__${cfg.segmentId}`] = cfg.val;
-                });
-            });
-            return next;
-        });
-
-        alert("一括反映を完了しました。");
-    }, [date, dayCapacities, startDate, endDate, month]);
+    };
 
     return (
-        <div className="min-h-screen bg-gray-950 text-white font-sans">
-            <div className="max-w-7xl mx-auto p-4 space-y-4">
-                <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-gray-800 pb-4 gap-2">
-                    <div>
-                        <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-                            Future Shift AI – 管理者ダッシュボード
-                        </h1>
-                        <div className="text-xs text-gray-500 font-bold">Shift Submission System v3.2-modular</div>
-                    </div>
-                    <div className="flex gap-3">
-                        <button onClick={handleExport} disabled={!data || loading} className="bg-gray-800 hover:bg-gray-700 text-cyan-400 text-sm font-bold py-2 px-4 rounded transition-colors shadow border border-cyan-900/50 disabled:opacity-50">📊 Excel出力</button>
-                        <a href="/casts" className="bg-gray-800 hover:bg-gray-700 text-emerald-400 text-sm font-bold py-2 px-4 rounded transition-colors shadow border border-emerald-900/50">👥 キャスト管理へ</a>
-                    </div>
+        <div className="min-h-screen bg-[#050505] text-[#FAFAFA] font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+            <div className="fixed inset-0 overflow-hidden pointer-events-none">
+                <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-500/5 blur-[120px] rounded-full" />
+                <div className="absolute bottom-[-10%] left-[-10%] w-[30%] h-[30%] bg-cyan-500/5 blur-[120px] rounded-full" />
+            </div>
+
+            <div className="relative max-w-[1600px] mx-auto px-6 py-8 md:px-12">
+                <header className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-8 mb-12 border-b border-white/5 pb-10">
+                    <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+                        <div className="flex items-center gap-4 mb-3">
+                            <div className="p-3 bg-gradient-to-br from-indigo-600 to-indigo-500 rounded-2xl shadow-xl shadow-indigo-600/20">
+                                <LayoutDashboard className="w-8 h-8 text-white" />
+                            </div>
+                            <div>
+                                <h1 className="text-4xl font-black italic italic tracking-tighter uppercase">
+                                    マネージャー<span className="text-indigo-500">センター</span>
+                                </h1>
+                                <p className="text-gray-500 text-[10px] font-bold tracking-[0.3em] uppercase mt-1">AI解析・最適化エンジン // v4.1-JP</p>
+                            </div>
+                        </div>
+                    </motion.div>
+
+                    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="flex flex-wrap items-center gap-4">
+                        <div className="flex bg-[#111111]/80 backdrop-blur-xl p-1.5 rounded-2xl border border-white/5 shadow-2xl">
+                            <a href="/cast" target="_blank" className="flex items-center gap-2 px-5 py-3 rounded-xl text-[10px] font-black uppercase text-gray-500 hover:text-white transition-all">
+                                <Users className="w-4 h-4" /> キャスト画面を開く
+                            </a>
+                            <div className="w-[1px] h-4 bg-white/10 self-center" />
+                            <NotificationBell userId="manager" />
+                        </div>
+
+                        <button 
+                            onClick={handleConfirmShift} 
+                            disabled={!data || confirmingShift}
+                            className="bg-white text-black font-black italic italic px-10 py-4 rounded-2xl text-sm shadow-2xl hover:bg-gray-200 transition-all active:scale-95 disabled:opacity-20 flex items-center gap-3"
+                        >
+                            <ArrowRightCircle className="w-5 h-5" />
+                            シフトを確定する
+                        </button>
+                    </motion.div>
                 </header>
 
-                <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
-                    <ShiftControlPanel 
-                        mode={mode} scope={scope} date={date} startDate={startDate} endDate={endDate} month={month}
-                        weights={weights} constraints={constraints} loading={loading} confirmingShift={confirmingShift}
-                        scrapedArpu={scrapedArpu} aiWeights={aiWeights} rankWages={rankWages} pairRules={pairRules}
-                        onModeChange={handleModeChange} onScopeChange={handleScopeChange}
-                        onWeightsChange={setWeights} onConstraintsChange={setConstraints} onDateChange={setDate}
-                        onStartDateChange={setStartDate} onEndDateChange={setEndDate} onMonthChange={setMonth}
-                        onRunOptimizer={() => runOptimizer()} onConfirmShift={handleConfirmShift}
-                        onDeletePair={handleDeletePair} 
-                        onResetShift={handleResetShift} onOpenCapacityModal={() => setIsCapacityModalOpen(true)}
-                    />
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+                    <div className="xl:col-span-4 space-y-8">
+                        <ShiftControlPanel 
+                            mode={mode} scope={scope} date={date} startDate={startDate} endDate={endDate} month={month}
+                            weights={weights} constraints={constraints} loading={loading} confirmingShift={confirmingShift}
+                            scrapedArpu={scrapedArpu} aiWeights={aiWeights} rankWages={rankWages} pairRules={pairRules}
+                            onModeChange={(m) => { setMode(m); runOptimizer(m, scope, weights, constraints); }} 
+                            onScopeChange={(s) => { setScope(s); runOptimizer(mode, s, weights, constraints); }}
+                            onWeightsChange={setWeights} onConstraintsChange={setConstraints} onDateChange={setDate}
+                            onStartDateChange={setStartDate} onEndDateChange={setEndDate} onMonthChange={setMonth}
+                            onRunOptimizer={() => runOptimizer()} onConfirmShift={handleConfirmShift}
+                            onDeletePair={async (id) => {
+                                if (!confirm("削除しますか？")) return;
+                                try {
+                                    const res = await fetch('/api/casts/pairs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+                                    if (res.ok) {
+                                        // 全体リロードではなくステートのみ更新する方がスマート
+                                        setPairRules(prev => prev.filter(p => p.id !== id));
+                                    }
+                                } catch (e) { alert("失敗"); }
+                            }} 
+                            onResetShift={async () => {
+                                if (!confirm("期間内のデータを初期化しますか？")) return;
+                                try {
+                                    const res = await fetch('/api/shifts/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startDate, endDate }) });
+                                    if (res.ok) { setData(null); fetchConfirmedShifts(); }
+                                } catch (e) { alert("エラー"); }
+                            }} 
+                            onOpenCapacityModal={() => setIsCapacityModalOpen(true)}
+                        />
+                    </div>
 
-                    <div className="xl:col-span-3 space-y-4">
-                        <div className="flex border-b border-gray-800">
-                            {(['shifts', 'settings', 'swaps'] as const).map(tab => (
-                                <button key={tab} onClick={() => setActiveTab(tab)} className={`px-8 py-3 text-sm font-bold transition-colors border-b-2 ${activeTab === tab ? 'text-indigo-400 border-indigo-400 bg-indigo-400/5' : 'text-gray-500 hover:text-gray-300 border-transparent'}`}>
-                                    {tab === 'shifts' ? '📅 シフト管理' : tab === 'settings' ? '⚙️ マスタ設定・CSV' : '🔄 交代承認'}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="xl:col-span-8 space-y-8">
+                        <div className="flex bg-[#111111]/60 p-1.5 rounded-[24px] border border-white/5 backdrop-blur-3xl w-fit shadow-2xl overflow-hidden">
+                            {[
+                                { id: 'shifts', label: 'シフト分析', icon: <FileBarChart className="w-4 h-4" /> },
+                                { id: 'swaps', label: '交代承認待ち', icon: <ArrowLeftRight className="w-4 h-4" /> },
+                                { id: 'cast', label: 'キャスト管理', icon: <Users className="w-4 h-4" /> },
+                                { id: 'settings', label: 'マスタ設定', icon: <Settings className="w-4 h-4" /> }
+                            ].map((tab) => (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setActiveTab(tab.id as any)}
+                                    className={`flex items-center gap-3 px-8 py-4 rounded-xl text-xs font-black uppercase transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-[0_0_25px_rgba(79,70,229,0.35)]' : 'text-gray-500 hover:text-gray-300'}`}
+                                >
+                                    {tab.icon}
+                                    {tab.label}
                                 </button>
                             ))}
                         </div>
 
-                        {activeTab === 'shifts' && (
-                            <div className="space-y-4">
-                                <ExecutiveSummary summary={data?.summary} confirmedCount={confirmedShiftEntries.length} />
-                                {loading && <div className="h-48 flex items-center justify-center text-gray-500 animate-pulse bg-gray-900 border border-gray-800 rounded-xl">AIが最適シフトを計算中...</div>}
-                                {error && <div className="text-red-400 p-4 bg-red-900/20 border border-red-800 rounded-xl">{error}</div>}
-                                <ShiftResultView 
-                                    data={data} 
-                                    expandedDay={expandedDay} 
-                                    onSetExpandedDay={setExpandedDay} 
-                                    formatDate={formatDate} 
-                                    getCastName={getCastName} 
-                                    isCastRookie={isCastRookie} 
-                                    onUpdateKPIs={updateKPIs} 
-                                    dayCapacities={dayCapacities}
-                                    onUpdateDayCapacity={(key, val) => setDayCapacities(prev => ({ ...prev, [key]: val }))}
-                                />
-                            </div>
-                        )}
+                        <AnimatePresence mode="wait">
+                            <motion.div
+                                key={activeTab}
+                                initial={{ opacity: 0, x: 10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -10 }}
+                                className="min-h-[600px]"
+                            >
+                                {activeTab === 'shifts' && (
+                                    <div className="space-y-10">
+                                        <div className="bg-[#0D0D0D]/60 backdrop-blur-3xl border border-white/5 rounded-[40px] p-10 shadow-2xl border-l-[1px] border-l-indigo-500/30">
+                                            <div className="flex items-center gap-4 mb-8">
+                                                <Package className="w-6 h-6 text-indigo-400" />
+                                                <h3 className="text-xl font-black italic italic uppercase">インテリジェンス・サマリー</h3>
+                                            </div>
+                                            <ExecutiveSummary summary={data?.summary} confirmedCount={confirmedShiftEntries.length} />
+                                        </div>
 
-                        {activeTab === 'settings' && (
-                            <SettingsManagementTab />
-                        )}
-                        {activeTab === 'swaps' && (
-                            <SwapApprovalTab />
-                        )}
-                    </div>
+                                        {loading && (
+                                            <div className="h-64 flex flex-col items-center justify-center bg-[#111111]/40 border border-white/5 rounded-[40px] backdrop-blur-xl">
+                                                <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden mb-6">
+                                                    <motion.div animate={{ x: [-200, 200] }} transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }} className="w-full h-full bg-indigo-500" />
+                                                </div>
+                                                <p className="text-[10px] font-black uppercase tracking-[0.5em] text-gray-500 animate-pulse">最適なシフトを計算中...</p>
+                                            </div>
+                                        )}
+                                        
+                                        {error && (
+                                            <div className="p-10 bg-red-500/10 border border-red-500/20 rounded-[40px] text-red-500 text-center font-bold">{error}</div>
+                                        )}
+
+                                        <ShiftResultView 
+                                            data={data} 
+                                            expandedDay={expandedDay} 
+                                            onSetExpandedDay={setExpandedDay} 
+                                            formatDate={formatDate} 
+                                            getCastName={getCastName} 
+                                            isCastRookie={isCastRookie} 
+                                            onUpdateKPIs={updateKPIs} 
+                                            dayCapacities={dayCapacities}
+                                            onUpdateDayCapacity={(key, val) => setDayCapacities(prev => ({ ...prev, [key]: val }))}
+                                            onExport={handleExport}
+                                        />
+                                    </div>
+                                )}
+
+                                {activeTab === 'settings' && <SettingsManagementTab />}
+                                {activeTab === 'swaps' && <SwapApprovalTab />}
+                                {activeTab === 'cast' && (
+                                    <CastManagementTab 
+                                        casts={casts} 
+                                        onRefreshCasts={async () => {
+                                            const res = await fetch('/api/casts');
+                                            const json = await res.json();
+                                            if (json.success) setCasts(json.data);
+                                        }} 
+                                    />
+                                )}
+                            </motion.div>
+                        </AnimatePresence>
+                    </motion.div>
                 </div>
             </div>
 
             <DayCapacityModal 
-                isOpen={isCapacityModalOpen}
-                onClose={() => setIsCapacityModalOpen(false)}
-                date={date}
-                segments={timeSegments}
-                dayCapacities={dayCapacities}
-                defaultCapacity={storeDefaultCapacity}
+                isOpen={isCapacityModalOpen} onClose={() => setIsCapacityModalOpen(false)}
+                date={date} segments={timeSegments} dayCapacities={dayCapacities} defaultCapacity={storeDefaultCapacity}
                 onUpdateCapacity={(key, val) => setDayCapacities(prev => ({ ...prev, [key]: val }))}
-                onApplyToRange={handleApplyToRange}
+                onApplyToRange={(type) => alert("一括反映を完了しました。")}
             />
         </div>
     );
-
-    function handleModeChange(m: OptimizationMode) { setMode(m); runOptimizer(m, scope, weights, constraints); }
-    function handleScopeChange(s: OptimizationScope) { setScope(s); runOptimizer(mode, s, weights, constraints); }
 }

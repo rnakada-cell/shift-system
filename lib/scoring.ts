@@ -60,12 +60,12 @@ export async function updateAllCastScores() {
   const casts = await prisma.cast.findMany();
   
   // 店舗全体の最大値を算出（正規化用）
-  const maxTotalRevenue = Math.max(...salesData.map(s => s.totalSales), 1);
+  const maxTotalRevenue = Math.max(...salesData.map(s => s.totalSales ?? 0), 1);
 
   for (const cast of casts) {
     // このキャストの全店舗分の売上を合算
     const castSales = salesData.filter(s => s.castName === cast.name);
-    const periodTotalRevenue = castSales.reduce((sum, s) => sum + s.totalSales, 0);
+    const periodTotalRevenue = castSales.reduce((sum, s) => sum + (s.totalSales ?? 0), 0);
     
     // 出勤日数の推定 (デフォルト10日)
     const estimatedDays = Math.max(1, (cast as any).monthlyAttendanceCount || 10); 

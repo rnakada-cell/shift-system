@@ -38,10 +38,27 @@ export async function POST(request: Request) {
             });
         });
 
+        // Trigger notification (non-blocking)
+        notifyManagerOfSubmission(castId);
+
         return NextResponse.json({ success: true, message: 'Availabilities saved successfully' });
     } catch (error: any) {
         console.error('Error saving availabilities:', error);
         return NextResponse.json({ success: false, error: 'Failed to save availabilities' }, { status: 500 });
+    }
+}
+
+// Side effect notification outside of main transaction for performance
+async function notifyManagerOfSubmission(castId: string) {
+    try {
+        const cast = await prisma.cast.findUnique({ where: { id: castId } });
+        if (!cast) return;
+
+        const { sendLineNotification, LINE_TEMPLATES } = await import('@/lib/line');
+        // In a real app, 'manager' might have a specific LINE ID in StoreSettings
+        await sendLineNotification('manager', LINE_TEMPLATES.AVAILABILITY_SUBMITTED(cast.name));
+    } catch (e) {
+        console.error('Notification error:', e);
     }
 }
 

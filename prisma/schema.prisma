@@ -29,6 +29,7 @@ model Cast {
   createdAt         DateTime?        @default(now())
   isUnderage       Boolean?         @default(false)
   isLeader         Boolean?         @default(false)
+  lineId           String?
   updatedAt        DateTime?        @updatedAt
   attendances       CastAttendance[]
   castScores        CastScore[]
@@ -62,6 +63,8 @@ model StoreSetting {
   scorePeriodDays           Int?      @default(30)
   rankDefaultWages          Json?
   defaultCapacity           Json?
+  lineChannelAccessToken   String?
+  lineChannelSecret        String?
   updatedAt                 DateTime? @updatedAt
 }
 
@@ -179,4 +182,16 @@ model DailyDemographics {
   createdAt    DateTime? @default(now())
 
   @@unique([date, shopId, customerType])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String   // castId or 'manager'
+  type      String   // SWAP_REQUEST, SWAP_APPLIED, SWAP_APPROVED, etc.
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  link      String?  // Optional link to navigate to
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
