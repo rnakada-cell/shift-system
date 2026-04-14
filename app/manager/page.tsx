@@ -23,6 +23,7 @@ import SettingsManagementTab from "../components/SettingsManagementTab";
 import SwapApprovalTab from "../components/SwapApprovalTab";
 import NotificationBell from "../components/NotificationBell";
 import CastManagementTab from "../components/CastManagementTab";
+import PairRuleModal from "../components/PairRuleModal";
 
 const DEFAULT_WEIGHTS: OptimizationWeights = {
     revenueWeight: 1.0,
@@ -80,6 +81,8 @@ export default function ManagerDashboard() {
         min1F: number; max1F: number; 
         min2F: number; max2F: number; 
     }>>({});
+    const [isPairModalOpen, setIsPairModalOpen] = useState(false);
+    const [editingPair, setEditingPair] = useState<any | null>(null);
 
     const getCastName = useCallback((id: string) => casts.find(c => c.id === id)?.name || id, [casts]);
     const isCastRookie = useCallback((id: string) => casts.find(c => c.id === id)?.isRookie || false, [casts]);
@@ -152,6 +155,12 @@ export default function ManagerDashboard() {
 
     useEffect(() => { fetchConfirmedShifts(); }, [date, fetchConfirmedShifts]);
 
+    const refreshPairs = async () => {
+        const res = await fetch('/api/casts/pairs');
+        const json = await res.json();
+        if (json.success) setPairRules(json.data);
+    };
+
     useEffect(() => {
         const init = async () => {
             try {
@@ -185,6 +194,22 @@ export default function ManagerDashboard() {
         };
         init();
     }, []);
+
+    const handleSavePair = async (pair: any) => {
+        const isUpdate = !!pair.id;
+        try {
+            const res = await fetch('/api/casts/pairs', {
+                method: isUpdate ? 'PATCH' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(pair)
+            });
+            if (res.ok) {
+                await refreshPairs();
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
 
     const handleConfirmShift = async () => {
         if (!data) return;
@@ -283,11 +308,18 @@ export default function ManagerDashboard() {
                                 try {
                                     const res = await fetch('/api/casts/pairs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
                                     if (res.ok) {
-                                        // 全体リロードではなくステートのみ更新する方がスマート
                                         setPairRules(prev => prev.filter(p => p.id !== id));
                                     }
                                 } catch (e) { alert("失敗"); }
                             }} 
+                            onEditPair={(rule) => {
+                                setEditingPair(rule);
+                                setIsPairModalOpen(true);
+                            }}
+                            onManagePairs={() => {
+                                setEditingPair(null);
+                                setIsPairModalOpen(true);
+                            }}
                             onResetShift={async () => {
                                 if (!confirm("期間内のデータを初期化しますか？")) return;
                                 try {
@@ -381,6 +413,23 @@ export default function ManagerDashboard() {
                     </motion.div>
                 </div>
             </div>
+
+            <PairRuleModal 
+                isOpen={isPairModalOpen} 
+                onClose={() => setIsPairModalOpen(false)}
+                pairRules={pairRules}
+                casts={casts}
+                onSavePair={handleSavePair}
+                onDeletePair={async (id) => {
+                    if (!confirm("削除しますか？")) return;
+                    try {
+                        const res = await fetch('/api/casts/pairs', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+                        if (res.ok) {
+                            setPairRules(prev => prev.filter(p => p.id !== id));
+                        }
+                    } catch (e) { alert("失敗"); }
+                }}
+            />
 
             <DayCapacityModal 
                 isOpen={isCapacityModalOpen} onClose={() => setIsCapacityModalOpen(false)}

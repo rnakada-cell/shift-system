@@ -9,7 +9,8 @@ import {
     Trash2, 
     Users,
     ChevronRight,
-    Search
+    Search,
+    Edit3
 } from "lucide-react";
 import { OptimizationMode, OptimizationScope, OptimizationWeights, OptimizationConstraints } from "@/lib/optimizer";
 
@@ -39,6 +40,8 @@ interface ShiftControlPanelProps {
   onRunOptimizer: () => void;
   onConfirmShift: () => void;
   onDeletePair: (id: string) => void;
+  onEditPair: (rule: any) => void;
+  onManagePairs: () => void;
   onResetShift: () => void;
   onOpenCapacityModal: () => void;
 }
@@ -48,7 +51,7 @@ export default function ShiftControlPanel(props: ShiftControlPanelProps) {
     scope, date, startDate, endDate, month,
     loading, confirmingShift, pairRules,
     onScopeChange, onDateChange, onStartDateChange, onEndDateChange, onMonthChange,
-    onRunOptimizer, onConfirmShift, onDeletePair,
+    onRunOptimizer, onConfirmShift, onDeletePair, onEditPair, onManagePairs,
     onResetShift, onOpenCapacityModal
   } = props;
 
@@ -169,7 +172,10 @@ export default function ShiftControlPanel(props: ShiftControlPanelProps) {
                 </div>
                 <h2 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">登録済みペアルール</h2>
             </div>
-            <button className="p-1 px-3 bg-white/5 rounded-full text-[8px] font-black text-gray-500 uppercase tracking-widest hover:text-white transition-colors">
+            <button 
+                onClick={onManagePairs}
+                className="p-1 px-3 bg-white/5 rounded-full text-[8px] font-black text-gray-500 uppercase tracking-widest hover:text-white transition-colors"
+            >
                 管理
             </button>
         </div>
@@ -196,12 +202,20 @@ export default function ShiftControlPanel(props: ShiftControlPanelProps) {
                             <span className="text-[11px] font-black italic italic text-white">{p.castNameB}</span>
                         </div>
                     </div>
-                    <button 
-                        onClick={() => onDeletePair(p.id)} 
-                        className="text-gray-700 hover:text-rose-500 transition-colors"
-                    >
-                        <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <button 
+                            onClick={() => onEditPair(p)} 
+                            className="text-gray-700 hover:text-indigo-400 transition-colors p-1"
+                        >
+                            <Edit3 className="w-3 h-3" />
+                        </button>
+                        <button 
+                            onClick={() => onDeletePair(p.id)} 
+                            className="text-gray-700 hover:text-rose-500 transition-colors p-1"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
                 </motion.div>
             ))
           )}
