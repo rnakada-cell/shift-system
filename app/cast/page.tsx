@@ -36,8 +36,9 @@ export default function CastInput() {
     const [castSearch, setCastSearch] = useState("");
     const [castDropdownOpen, setCastDropdownOpen] = useState(false);
     const [selectedDate, setSelectedDate] = useState<string | null>(null);
+    const [message, setMessage] = useState("");
 
-    const VERSION = "v4.2.0-jp";
+    const VERSION = "v4.2.1-jp";
 
     useEffect(() => {
         setMounted(true);
@@ -76,6 +77,32 @@ export default function CastInput() {
         };
         fetchConfirmed();
     }, [castId, currentYear, currentMonth, days]);
+
+    const handleSwapRequest = async (date: string) => {
+        if (!castId) return;
+        const note = prompt("交代の理由や条件を入力してください（例：急用のため、18時からなら可など）");
+        if (note === null) return;
+
+        try {
+            const res = await fetch('/api/shifts/swap', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date, castId, isSwapRequested: true, note })
+            });
+            if (res.ok) {
+                setMessage("交代の募集を開始しました！📢");
+                setTimeout(() => setMessage(""), 3000);
+                // Refresh data
+                const start = toLocalDateString(days[0]);
+                const end = toLocalDateString(days[days.length - 1]);
+                const refreshRes = await fetch(`/api/shifts?castId=${castId}&startDate=${start}&endDate=${end}`);
+                const data = await refreshRes.json();
+                if (Array.isArray(data)) setConfirmedShifts(data);
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-rose-50 text-gray-800 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
@@ -233,14 +260,26 @@ export default function CastInput() {
                                         {confirmedShifts.filter(s => s.date === selectedDate).length > 0 ? (
                                             confirmedShifts.filter(s => s.date === selectedDate).map((s, i) => (
                                                 <div key={i} className="bg-white border border-pink-200 rounded-3xl p-6 relative overflow-hidden group">
-                                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500" />
+                                                    <div className={`absolute left-0 top-0 bottom-0 w-1 ${s.isSwapRequested ? 'bg-amber-500' : 'bg-emerald-500'}`} />
                                                     <div className="flex justify-between items-start mb-4">
                                                         <h4 className="font-black italic text-lg">{s.segmentId}</h4>
-                                                        <span className="text-[10px] px-3 py-1 rounded-full font-black uppercase bg-emerald-500 text-black">確定済み</span>
+                                                        <span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase ${s.isSwapRequested ? 'bg-amber-500 text-black' : 'bg-emerald-500 text-black'}`}>
+                                                            {s.isSwapRequested ? '交代募集中' : '確定済み'}
+                                                        </span>
                                                     </div>
-                                                    <p className="text-xs text-gray-500 leading-relaxed">
-                                                        本日のシフトは確定しています。変更・交代希望は管理者に直接連絡してください。
+                                                    <p className="text-xs text-gray-500 leading-relaxed mb-6">
+                                                        {s.isSwapRequested 
+                                                            ? `現在、このシフトの代わりに出てくれるメンバーを募集しています。承認をお待ちください。`
+                                                            : `本日のシフトは確定しています。もし変更を希望する場合は、下のボタンから交代募集を出すことができます。`}
                                                     </p>
+                                                    {!s.isSwapRequested && (
+                                                        <button 
+                                                            onClick={() => handleSwapRequest(selectedDate)}
+                                                            className="w-full py-4 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-500 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                                        >
+                                                            交代（ヘルプ）を募集する
+                                                        </button>
+                                                    )}
                                                 </div>
                                             ))
                                         ) : (
@@ -260,6 +299,20 @@ export default function CastInput() {
                         </AnimatePresence>
                     </div>
                 </main>
+
+                {/* Toast Messages */}
+                <AnimatePresence>
+                    {message && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 50 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[60] bg-white border border-pink-100 text-gray-800 px-8 py-4 rounded-2xl shadow-2xl font-black italic tracking-tight"
+                        >
+                            {message}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );
