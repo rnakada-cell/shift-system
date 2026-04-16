@@ -30,13 +30,14 @@ export interface Cast {
     isManualBackRate?: boolean; // Phase 7: 手動設定上書きフラグ
     skillLevel?: number;
     aiScore?: number; // AIによる計算済みスコア (0-1000)
+    lineId?: string; // LINE連携用ID
     strengthItems?: string[]; // Phase 5: 得意アイテム登録 (例: ["シャンパン", "チェキ"])
     arpu?: number;          // Phase 5: 実際の客単価 (円)
     hourlyRevenue?: number; // 全体の時給売上実績
-    granularRevenue?: {     // 時間帯別の時給売上実績
-        weekdayDay: number;
-        weekdayNight: number;
-        weekend: number;
+    granularRevenue?: {     // 時間帯別の時給売上実績 (Phase 10: 14-00対応)
+        early: number; // 14-18
+        mid: number;   // 18-21
+        late: number;  // 21-00
     };
 }
 
@@ -182,12 +183,12 @@ function calcBaseScore(
     const isNight = (hour >= 21 || hour < 5);
 
     if (cast.granularRevenue) {
-        if (isWeekend && cast.granularRevenue.weekend > 0) {
-            hourlyRevenuePotential = cast.granularRevenue.weekend;
-        } else if (!isWeekend && isNight && cast.granularRevenue.weekdayNight > 0) {
-            hourlyRevenuePotential = cast.granularRevenue.weekdayNight;
-        } else if (!isWeekend && !isNight && cast.granularRevenue.weekdayDay > 0) {
-            hourlyRevenuePotential = cast.granularRevenue.weekdayDay;
+        if (hour >= 14 && hour < 18 && cast.granularRevenue.early > 0) {
+            hourlyRevenuePotential = cast.granularRevenue.early;
+        } else if (hour >= 18 && hour < 21 && cast.granularRevenue.mid > 0) {
+            hourlyRevenuePotential = cast.granularRevenue.mid;
+        } else if ((hour >= 21 || hour < 2) && cast.granularRevenue.late > 0) {
+            hourlyRevenuePotential = cast.granularRevenue.late;
         }
     }
 
@@ -238,7 +239,8 @@ function calcBaseScore(
     } else if (mode === 'PROFIT_MAX') {
         baseScore = (expectedRevenue - expectedCost) * weights.profitWeight;
     } else {
-        const rookiePoints = cast.isRookie ? 10000 : 0;
+        // LTV_MAX モード（デフォルト）: 売上予測に加え、新人・実績重視
+        const rookiePoints = cast.isRookie ? 1000000 : 0; // 新人は圧倒的優先 (議事録: 100%通す)
         baseScore = (expectedRevenue * weights.ltvBaseWeight) + (rookiePoints * weights.rookieBonusWeight);
     }
 

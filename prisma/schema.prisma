@@ -30,9 +30,25 @@ model Cast {
   isUnderage       Boolean?         @default(false)
   isLeader         Boolean?         @default(false)
   lineId           String?
+  joinedDate       DateTime?        @default(now())
+  isActive         Boolean?         @default(true)
   updatedAt        DateTime?        @updatedAt
   attendances       CastAttendance[]
   castScores        CastScore[]
+}
+
+model ShiftRequest {
+  id          String   @id @default(cuid())
+  castName    String?
+  castId      String?
+  lineId      String?
+  date        String
+  startTime   String
+  endTime     String
+  source      String   @default("line")
+  status      String   @default("pending")
+  rawText     String?
+  createdAt   DateTime @default(now())
 }
 
 model Availability {

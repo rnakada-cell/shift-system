@@ -228,6 +228,9 @@ async function handleOptimization(body: any) {
 
         console.log('Optimization summary:', JSON.stringify(result.summary));
         console.timeEnd('optimizer_total');
+        
+        // フロントエンドの「比較ビュー」用に希望シフトデータを付与
+        (result as any).availabilities = customAvailabilities;
 
         return NextResponse.json({ success: true, data: result });
     } catch (error: any) {

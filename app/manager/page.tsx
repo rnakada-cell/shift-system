@@ -9,7 +9,8 @@ import {
     FileBarChart, 
     ArrowRightCircle,
     Package,
-    Users
+    Users,
+    MessageSquare
 } from "lucide-react";
 import { OptimizationMode, OptimizationScope, OptimizationWeights, OptimizationConstraints, DaySegmentCapacity, Cast, TimeSegment } from "@/lib/optimizer";
 import { toLocalDateString, formatDate } from "@/lib/utils";
@@ -24,6 +25,7 @@ import SwapApprovalTab from "../components/SwapApprovalTab";
 import NotificationBell from "../components/NotificationBell";
 import CastManagementTab from "../components/CastManagementTab";
 import PairRuleModal from "../components/PairRuleModal";
+import LineRequestInbox from "../components/LineRequestInbox";
 
 const DEFAULT_WEIGHTS: OptimizationWeights = {
     revenueWeight: 1.0,
@@ -71,7 +73,7 @@ export default function ManagerDashboard() {
     });
     const [confirmedShiftEntries, setConfirmedShiftEntries] = useState<any[]>([]);
     const [confirmingShift, setConfirmingShift] = useState(false);
-    const [activeTab, setActiveTab] = useState<'shifts' | 'settings' | 'swaps' | 'cast'>('shifts');
+    const [activeTab, setActiveTab] = useState<'shifts' | 'settings' | 'swaps' | 'cast' | 'requests'>('shifts');
     const [isCapacityModalOpen, setIsCapacityModalOpen] = useState(false);
     const [rankWages, setRankWages] = useState<Record<string, number>>({
         'S': 3000, 'A': 2500, 'B': 2000, 'C': 1500
@@ -334,10 +336,11 @@ export default function ManagerDashboard() {
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="xl:col-span-8 space-y-8">
                         <div className="flex bg-[#111111]/60 p-1.5 rounded-[24px] border border-white/5 backdrop-blur-3xl w-fit shadow-2xl overflow-hidden">
                             {[
-                                { id: 'shifts', label: 'シフト分析', icon: <FileBarChart className="w-4 h-4" /> },
-                                { id: 'swaps', label: '交代承認待ち', icon: <ArrowLeftRight className="w-4 h-4" /> },
-                                { id: 'cast', label: 'キャスト管理', icon: <Users className="w-4 h-4" /> },
-                                { id: 'settings', label: 'マスタ設定', icon: <Settings className="w-4 h-4" /> }
+                                { id: 'shifts', label: 'シフト', icon: <ArrowLeftRight className="w-5 h-5" /> },
+                                { id: 'requests', label: 'LINE申請', icon: <MessageSquare className="w-5 h-5" /> },
+                                { id: 'cast', label: 'キャスト', icon: <Users className="w-5 h-5" /> },
+                                { id: 'settings', label: '設定', icon: <Settings className="w-5 h-5" /> },
+                                { id: 'swaps', label: 'トレード', icon: <FileBarChart className="w-5 h-5" /> },
                             ].map((tab) => (
                                 <button
                                     key={tab.id}
@@ -398,16 +401,12 @@ export default function ManagerDashboard() {
 
                                 {activeTab === 'settings' && <SettingsManagementTab />}
                                 {activeTab === 'swaps' && <SwapApprovalTab />}
-                                {activeTab === 'cast' && (
-                                    <CastManagementTab 
-                                        casts={casts} 
-                                        onRefreshCasts={async () => {
-                                            const res = await fetch('/api/casts');
-                                            const json = await res.json();
-                                            if (json.success) setCasts(json.data);
-                                        }} 
-                                    />
-                                )}
+                                {activeTab === 'cast' && <CastManagementTab casts={casts} onRefreshCasts={() => {
+                                    fetch('/api/casts').then(r => r.json()).then(j => j.success && setCasts(j.data));
+                                }} />}
+                                {activeTab === 'requests' && <LineRequestInbox onRefresh={() => {
+                                    // Optionally refresh other data if needed
+                                }} />}
                             </motion.div>
                         </AnimatePresence>
                     </motion.div>

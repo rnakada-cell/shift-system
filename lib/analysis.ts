@@ -15,9 +15,9 @@ export interface CastAnalysis {
   arpu: number;
   topItems: ItemStat[];
   hourlyRevenueBySlot: {
-    weekdayDay: number;
-    weekdayNight: number;
-    weekend: number;
+    early: number; // 14-18
+    mid: number;   // 18-21
+    late: number;  // 21-00
     overall: number;
   };
 }
@@ -59,8 +59,8 @@ export async function getCastPerformance(shopId: string, days: number = 30) {
     totalSales: number, 
     count: number, 
     items: Map<string, ItemStat>,
-    salesBySlot: { weekdayDay: number, weekdayNight: number, weekend: number },
-    hoursBySlot: { weekdayDay: number, weekdayNight: number, weekend: number },
+    salesBySlot: { early: number, mid: number, late: number },
+    hoursBySlot: { early: number, mid: number, late: number },
     txIds: Set<string>
   }>();
 
@@ -69,8 +69,8 @@ export async function getCastPerformance(shopId: string, days: number = 30) {
     if (!castMap.has(tx.castName)) {
       castMap.set(tx.castName, { 
         totalSales: 0, count: 0, items: new Map(),
-        salesBySlot: { weekdayDay: 0, weekdayNight: 0, weekend: 0 },
-        hoursBySlot: { weekdayDay: 0, weekdayNight: 0, weekend: 0 },
+        salesBySlot: { early: 0, mid: 0, late: 0 },
+        hoursBySlot: { early: 0, mid: 0, late: 0 },
         txIds: new Set<string>()
       });
     }
@@ -84,17 +84,14 @@ export async function getCastPerformance(shopId: string, days: number = 30) {
     data.txIds.add(tx.id.split('-')[0]);
 
     const date = new Date(tx.closedAt);
-    const day = date.getDay();
     const hour = date.getHours();
-    const isWeekend = (day === 0 || day === 6);
-    const isNight = (hour >= 21 || hour < 5);
 
-    if (isWeekend) {
-      data.salesBySlot.weekend += cappedPrice;
-    } else if (isNight) {
-      data.salesBySlot.weekdayNight += cappedPrice;
-    } else {
-      data.salesBySlot.weekdayDay += cappedPrice;
+    if (hour >= 14 && hour < 18) {
+      data.salesBySlot.early += cappedPrice;
+    } else if (hour >= 18 && hour < 21) {
+      data.salesBySlot.mid += cappedPrice;
+    } else if (hour >= 21 || hour < 2) { // 21:00以降
+      data.salesBySlot.late += cappedPrice;
     }
 
     if (!data.items.has(tx.itemName)) {
@@ -119,16 +116,12 @@ export async function getCastPerformance(shopId: string, days: number = 30) {
     let duration = (outH + outM/60) - (inH + inM/60);
     if (duration < 0) duration += 24;
 
-    const date = new Date(att.date);
-    const day = date.getDay();
-    const isWeekend = (day === 0 || day === 6);
-    
-    if (isWeekend) {
-      data.hoursBySlot.weekend += duration;
-    } else if (inH >= 20 || inH < 5) {
-      data.hoursBySlot.weekdayNight += duration;
+    if (inH >= 14 && inH < 18) {
+      data.hoursBySlot.early += duration;
+    } else if (inH >= 18 && inH < 21) {
+      data.hoursBySlot.mid += duration;
     } else {
-      data.hoursBySlot.weekdayDay += duration;
+      data.hoursBySlot.late += duration;
     }
   });
 
@@ -138,7 +131,7 @@ export async function getCastPerformance(shopId: string, days: number = 30) {
       .slice(0, 5);
 
     const calcHr = (sales: number, hours: number) => hours > 0 ? Math.round(sales / hours) : 0;
-    const totalHours = data.hoursBySlot.weekdayDay + data.hoursBySlot.weekdayNight + data.hoursBySlot.weekend;
+    const totalHours = data.hoursBySlot.early + data.hoursBySlot.mid + data.hoursBySlot.late;
 
     return {
       castName,
@@ -147,9 +140,9 @@ export async function getCastPerformance(shopId: string, days: number = 30) {
       arpu: data.txIds.size > 0 ? Math.round(data.totalSales / data.txIds.size) : 0,
       topItems,
       hourlyRevenueBySlot: {
-        weekdayDay: calcHr(data.salesBySlot.weekdayDay, data.hoursBySlot.weekdayDay),
-        weekdayNight: calcHr(data.salesBySlot.weekdayNight, data.hoursBySlot.weekdayNight),
-        weekend: calcHr(data.salesBySlot.weekend, data.hoursBySlot.weekend),
+        early: calcHr(data.salesBySlot.early, data.hoursBySlot.early),
+        mid: calcHr(data.salesBySlot.mid, data.hoursBySlot.mid),
+        late: calcHr(data.salesBySlot.late, data.hoursBySlot.late),
         overall: calcHr(data.totalSales, totalHours)
       }
     };

@@ -211,20 +211,19 @@ export default function CastManagementTab({ casts, onRefreshCasts }: CastManagem
                                             />
                                         </div>
                                     </div>
-                                    <div className="bg-[#050505]/40 p-4 rounded-2xl border border-white/5">
+                                    <div className="bg-[#050505]/40 p-4 rounded-2xl border border-white/5 col-span-2">
                                         <div className="flex items-center gap-2 mb-2">
-                                            <Zap className="w-3 h-3 text-cyan-500/50" />
-                                            <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">属性フラグ</span>
+                                            <Shield className="w-3 h-3 text-pink-500/50" />
+                                            <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">LINE連携 (User ID)</span>
                                         </div>
-                                        <div className="flex gap-2">
-                                            <button 
-                                                onClick={() => handleSaveCast({...cast, isRookie: !cast.isRookie})}
-                                                className={`text-[9px] font-black px-2 py-1 rounded-lg border transition-all ${cast.isRookie ? 'bg-amber-500/20 border-amber-500/40 text-amber-500' : 'bg-white/5 border-white/10 text-gray-600'}`}
-                                            >新人</button>
-                                            <button 
-                                                onClick={() => handleSaveCast({...cast, isLeader: !(cast as any).isLeader})}
-                                                className={`text-[9px] font-black px-2 py-1 rounded-lg border transition-all ${(cast as any).isLeader ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-white/5 border-white/10 text-gray-600'}`}
-                                            >リーダー</button>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="text" 
+                                                value={cast.lineId || ""}
+                                                placeholder="Uxxx..."
+                                                onChange={e => handleSaveCast({...cast, lineId: e.target.value})}
+                                                className="bg-transparent text-[11px] font-mono text-gray-400 outline-none w-full" 
+                                            />
                                         </div>
                                     </div>
                                 </div>
