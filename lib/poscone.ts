@@ -67,6 +67,16 @@ export interface DemographicRow {
   totalSales: number;
 }
 
+export type ShiftType = 'confirmed' | 'requested' | 'exception';
+
+export interface ShiftEntry {
+  type: ShiftType;
+  castName: string;
+  startTime: string; // "HH:MM"
+  endTime: string;   // "HH:MM"
+  date: string;      // "YYYY-MM-DD"
+}
+
 /** 商品名からカテゴリを推定 */
 function guessCategory(itemName: string): string {
   const name = itemName.toLowerCase();
@@ -524,6 +534,119 @@ export class PosconeClient {
     });
 
     console.log(`[POSCONE] fetchDemographics: ${results.length} rows for ${shopId}`);
+    return results;
+  }
+
+  /**
+   * シフト一覧（月次）を取得してCSSクラスで確定/希望を区別する
+   * URL: /schedule_itiran.php?type=monthly&year=YYYY&month=M&shop=N
+   *
+   * btn-gradient-dark  = 確定シフト（青）
+   * btn-gradient-success = 希望シフト（緑・LINE申請が自動反映）
+   * btn-light          = なし
+   *
+   * @param shopId  'love_point' | 'room_of_love_point'
+   * @param year    例: 2026
+   * @param month   例: 5
+   * @param filterDay 指定した場合はその日のみ返す（未指定なら全日）
+   */
+  async fetchShiftList(
+    shopId: ShopId,
+    year: number,
+    month: number,
+    filterDay?: number
+  ): Promise<ShiftEntry[]> {
+    const shop = SHOP_PARAM[shopId];
+    const url = `${POSCONE_BASE}/schedule_itiran.php?type=monthly&year=${year}&month=${month}&shop=${shop}`;
+    const html = await this.fetchHtml(url);
+
+    if (!html || (html.includes('login.php') && html.includes('ログイン'))) {
+      console.error('[POSCONE] fetchShiftList: session expired or login failed');
+      return [];
+    }
+
+    const $ = cheerio.load(html);
+    const results: ShiftEntry[] = [];
+
+    // ── ヘッダー行から「列インデックス → 日付」マッピングを作成 ──
+    // ヘッダーセルのテキスト例: "1 Wed7人" → 1日
+    const colDateMap: Map<number, string> = new Map();
+    const headerCells = $('table tr').first().find('td, th');
+    headerCells.each((colIdx, cell) => {
+      const text = $(cell).text().trim();
+      const dayMatch = text.match(/^(\d{1,2})\s/);
+      if (dayMatch) {
+        const day = parseInt(dayMatch[1], 10);
+        if (!filterDay || day === filterDay) {
+          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          colDateMap.set(colIdx, dateStr);
+        }
+      }
+    });
+
+    if (colDateMap.size === 0) {
+      console.warn('[POSCONE] fetchShiftList: no matching date columns found');
+      return [];
+    }
+
+    // ── データ行をスキャン ──
+    const rows = $('table tr');
+    console.log(`[POSCONE] Scoping ${rows.length} table rows for shifts...`);
+    
+    rows.each((rowIdx, tr) => {
+      const cells = $(tr).find('td, th');
+      if (cells.length < colDateMap.size) return;
+
+      // 1列目または2列目から名前を取得（設定によって入れ替わることがあるため）
+      let staffName = '';
+      const cell0 = cells.eq(0).text().trim();
+      const cell1 = cells.eq(1).text().trim();
+      
+      if (cell0 && cell0 !== 'スタッフ名' && cell0 !== '日付' && cell0 !== '合計' && !/^[0-9\/]+$/.test(cell0)) {
+          staffName = cell0;
+      } else if (cell1 && cell1 !== '合計' && !/^[0-9\/]+$/.test(cell1)) {
+          staffName = cell1;
+      }
+
+      // スタッフ名が取れない or Summary行的なものはスキップ
+      if (!staffName || staffName === 'スタッフ名' || staffName.includes('計')) return;
+
+      colDateMap.forEach((dateStr, colIdx) => {
+        const cell = cells.eq(colIdx);
+        if (cell.length === 0) return;
+
+        const btn = cell.find('[class*="btn"]').first();
+        if (!btn.length) return;
+
+        const btnClass = btn.attr('class') || '';
+        const btnText = btn.text().trim();
+
+        // 時間パターン: "15:00~23:00" or "15:00～23:00"
+        const timeMatch = btnText.match(/(\d{1,2}:\d{2})[~～\-〜](\d{1,2}:\d{2})/);
+        if (!timeMatch) return;
+
+        let type: ShiftType;
+        if (btnClass.includes('btn-gradient-success')) {
+          type = 'requested';
+        } else if (btnClass.includes('btn-gradient-dark') || btnClass.includes('btn-gradient-indigo') || btnClass.includes('bg-dark')) {
+          type = 'confirmed';
+        } else {
+          type = 'exception';
+        }
+
+        console.log(`[POSCONE] Found ${type} shift for ${staffName} on ${dateStr}: ${timeMatch[1]} - ${timeMatch[2]}`);
+
+        results.push({
+          type,
+          castName: staffName,
+          startTime: timeMatch[1],
+          endTime: timeMatch[2],
+          date: dateStr,
+        });
+      });
+    });
+
+    console.log(`[POSCONE] fetchShiftList: ${results.length} entries for ${shopId} ${year}/${month}${filterDay ? '/' + filterDay : ''}`);
     return results;
   }
 }

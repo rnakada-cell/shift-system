@@ -10,9 +10,27 @@ export async function GET() {
             return NextResponse.json({ success: false, error: 'Settings not found' }, { status: 404 });
         }
         
+        let rawSegments = (settings.defaultSegments as any[]) || [];
+        
+        // Phase 10: 14:00枠が欠落している場合の自動補完
+        if (rawSegments.length < 5) {
+            console.log("Segment count low, injecting default expanded segments.");
+            rawSegments = [
+                { id: 'SEG_14_16', label: '14:00 - 16:00', hours: 2, demandFactor: 0.6, maxCapacity: 17 },
+                { id: 'SEG_16_18', label: '16:00 - 18:00', hours: 2, demandFactor: 0.8, maxCapacity: 17 },
+                { id: 'SEG_18_20', label: '18:00 - 20:00', hours: 2, demandFactor: 1.0, maxCapacity: 17 },
+                { id: 'SEG_20_22', label: '20:00 - 22:00', hours: 2, demandFactor: 1.3, maxCapacity: 17 },
+                { id: 'SEG_22_24', label: '22:00 - 24:00', hours: 2, demandFactor: 1.1, maxCapacity: 17 },
+                { id: 'SEG_00_02', label: '00:00 - 02:00', hours: 2, demandFactor: 0.9, maxCapacity: 12 },
+                { id: 'SEG_02_04', label: '02:00 - 04:00', hours: 2, demandFactor: 0.7, maxCapacity: 8 },
+                { id: 'SEG_04_06', label: '04:00 - 06:00', hours: 2, demandFactor: 0.5, maxCapacity: 8 },
+            ];
+        }
+
         // Ensure defaults for missing fields
         const safeSettings = {
             ...settings,
+            defaultSegments: rawSegments,
             rankDefaultWages: settings.rankDefaultWages || { "S": 3500, "A": 3000, "B": 2500, "C": 2000 },
             scoreWeightHourlyRevenue: settings.scoreWeightHourlyRevenue ?? 0.4,
             scoreWeightTotalRevenue: settings.scoreWeightTotalRevenue ?? 0.3,
@@ -59,9 +77,18 @@ export async function POST(request: Request) {
             create: {
                 id: 'main-store',
                 name: body.name || 'Future Shift Store',
-                businessStart: body.businessStart || '18:00',
-                businessEnd: body.businessEnd || '05:00',
-                defaultSegments: body.defaultSegments || [],
+                businessStart: body.businessStart || '14:00',
+                businessEnd: body.businessEnd || '06:00',
+                defaultSegments: body.defaultSegments || [
+                    { id: 'SEG_14_16', label: '14:00 - 16:00', hours: 2, demandFactor: 0.6, maxCapacity: 17 },
+                    { id: 'SEG_16_18', label: '16:00 - 18:00', hours: 2, demandFactor: 0.8, maxCapacity: 17 },
+                    { id: 'SEG_18_20', label: '18:00 - 20:00', hours: 2, demandFactor: 1.0, maxCapacity: 17 },
+                    { id: 'SEG_20_22', label: '20:00 - 22:00', hours: 2, demandFactor: 1.3, maxCapacity: 17 },
+                    { id: 'SEG_22_24', label: '22:00 - 24:00', hours: 2, demandFactor: 1.1, maxCapacity: 17 },
+                    { id: 'SEG_00_02', label: '00:00 - 02:00', hours: 2, demandFactor: 0.9, maxCapacity: 12 },
+                    { id: 'SEG_02_04', label: '02:00 - 04:00', hours: 2, demandFactor: 0.7, maxCapacity: 8 },
+                    { id: 'SEG_04_06', label: '04:00 - 06:00', hours: 2, demandFactor: 0.5, maxCapacity: 8 },
+                ],
                 scoreWeightHourlyRevenue: body.scoreWeightHourlyRevenue ?? 0.4,
                 scoreWeightTotalRevenue: body.scoreWeightTotalRevenue ?? 0.3,
                 scoreWeightCustomerCount: body.scoreWeightCustomerCount ?? 0.2,

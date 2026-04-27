@@ -198,16 +198,48 @@ export default function CastManagementTab({ casts, onRefreshCasts }: CastManagem
                                     <div className="bg-[#050505]/40 p-4 rounded-2xl border border-white/5">
                                         <div className="flex items-center gap-2 mb-2">
                                             <TrendingUp className="w-3 h-3 text-emerald-500/50" />
-                                            <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">想定売上/h</span>
+                                            <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">ドリンクバック</span>
                                         </div>
                                         <div className="flex items-center gap-1">
-                                            <span className="text-sm font-black italic italic text-gray-500">¥</span>
+                                            <input 
+                                                type="number" 
+                                                value={(cast.drinkBackRate || 0) * 100}
+                                                step="1"
+                                                onChange={e => handleSaveCast({...cast, drinkBackRate: (parseFloat(e.target.value) || 0) / 100})}
+                                                className="bg-transparent text-sm font-black italic text-white outline-none w-10 text-right" 
+                                            />
+                                            <span className="text-xs font-black italic text-gray-500">%</span>
+                                        </div>
+                                    </div>
+                                    <div className="bg-[#050505]/40 p-4 rounded-2xl border border-white/5">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <TrendingUp className="w-3 h-3 text-emerald-500/50" />
+                                            <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">チェキバック</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <input 
+                                                type="number" 
+                                                value={(cast.chekiBackRate || 0) * 100}
+                                                step="1"
+                                                onChange={e => handleSaveCast({...cast, chekiBackRate: (parseFloat(e.target.value) || 0) / 100})}
+                                                className="bg-transparent text-sm font-black italic text-white outline-none w-10 text-right" 
+                                            />
+                                            <span className="text-xs font-black italic text-gray-500">%</span>
+                                        </div>
+                                    </div>
+                                    <div className="bg-[#050505]/40 p-4 rounded-2xl border border-white/5 col-span-2">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <TrendingUp className="w-3 h-3 text-emerald-500/50" />
+                                            <span className="text-[8px] font-black text-gray-500 uppercase tracking-widest">想定売上/h (AI補完用)</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-sm font-black italic text-gray-500">¥</span>
                                             <input 
                                                 type="number" 
                                                 value={cast.averageSales}
                                                 step="1000"
                                                 onChange={e => handleSaveCast({...cast, averageSales: parseInt(e.target.value) || 0})}
-                                                className="bg-transparent text-sm font-black italic italic text-white outline-none w-full" 
+                                                className="bg-transparent text-sm font-black italic text-white outline-none w-full" 
                                             />
                                         </div>
                                     </div>

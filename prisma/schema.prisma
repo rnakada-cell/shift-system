@@ -27,28 +27,43 @@ model Cast {
   aiScore           Int?             @default(0)
   preferredSegments String[]
   createdAt         DateTime?        @default(now())
-  isUnderage       Boolean?         @default(false)
-  isLeader         Boolean?         @default(false)
-  lineId           String?
-  joinedDate       DateTime?        @default(now())
-  isActive         Boolean?         @default(true)
-  updatedAt        DateTime?        @updatedAt
+  updatedAt         DateTime?        @updatedAt
+  isLeader          Boolean?         @default(false)
+  isUnderage        Boolean?         @default(false)
+  lineId            String?
+  isActive          Boolean?         @default(true)
+  joinedDate        DateTime?        @default(now())
   attendances       CastAttendance[]
   castScores        CastScore[]
 }
 
 model ShiftRequest {
-  id          String   @id @default(cuid())
-  castName    String?
-  castId      String?
-  lineId      String?
-  date        String
-  startTime   String
-  endTime     String
-  source      String   @default("line")
-  status      String   @default("pending")
-  rawText     String?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  castName  String?
+  date      String
+  startTime String
+  endTime   String
+  source    String   @default("line")
+  createdAt DateTime @default(now())
+  castId    String?
+  lineId    String?
+  rawText   String?
+  status    String   @default("pending")
+}
+
+model ConfirmedShift {
+  id        String   @id @default(cuid())
+  castName  String
+  castId    String?
+  date      String
+  startTime String
+  endTime   String
+  shopId    String   @default("love_point")
+  source    String   @default("POSCONE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([castName, date, shopId])
 }
 
 model Availability {
@@ -79,9 +94,9 @@ model StoreSetting {
   scorePeriodDays           Int?      @default(30)
   rankDefaultWages          Json?
   defaultCapacity           Json?
-  lineChannelAccessToken   String?
-  lineChannelSecret        String?
   updatedAt                 DateTime? @updatedAt
+  lineChannelAccessToken    String?
+  lineChannelSecret         String?
 }
 
 model CastDailySales {
@@ -159,19 +174,19 @@ model CastPairRule {
 }
 
 model Shift {
-  id        String    @id @default(cuid())
-  date      String
-  shopId    String
-  segmentId String
-  castId    String
-  floor     String?
-  note      String?
-  isSwapRequested Boolean?   @default(false)
+  id              String    @id @default(cuid())
+  date            String
+  shopId          String
+  segmentId       String
+  castId          String
+  floor           String?
+  note            String?
+  createdAt       DateTime? @default(now())
+  updatedAt       DateTime? @updatedAt
+  isSwapRequested Boolean?  @default(false)
   swapApplicantId String?
-  swapStatus      String?    @default("NONE") // NONE, REQUESTED, APPLIED, APPROVED
   swapNote        String?
-  createdAt DateTime? @default(now())
-  updatedAt DateTime? @updatedAt
+  swapStatus      String?   @default("NONE")
 }
 
 model CastAttendance {
@@ -202,12 +217,12 @@ model DailyDemographics {
 
 model Notification {
   id        String   @id @default(cuid())
-  userId    String   // castId or 'manager'
-  type      String   // SWAP_REQUEST, SWAP_APPLIED, SWAP_APPROVED, etc.
+  userId    String
+  type      String
   title     String
   message   String
   isRead    Boolean  @default(false)
-  link      String?  // Optional link to navigate to
+  link      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

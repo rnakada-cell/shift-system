@@ -132,10 +132,10 @@ export default function ShiftResultView(props: ShiftResultViewProps) {
                                         <div className="w-40 shrink-0"></div>
                                         <div className="flex-1 flex gap-2">
                                             {day.segments.map((seg: any) => (
-                                                <div key={seg.segmentId} className="flex-1 text-center">
+                                                <div key={seg.segmentId} className="flex-1 text-center min-w-[100px]">
                                                     <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl py-2 mb-2">
                                                         <span className="text-xs font-black italic tracking-tighter text-indigo-400">
-                                                            {seg.segmentId.replace('SEG_', '').replace('_', ':00-') + ':00'}
+                                                            {seg.label || seg.segmentId.replace('SEG_', '').replace('_', ':00-') + ':00'}
                                                         </span>
                                                     </div>
                                                     <div className="flex justify-around text-[10px] font-black uppercase text-gray-500">
@@ -173,9 +173,11 @@ export default function ShiftResultView(props: ShiftResultViewProps) {
                                                                         const [h,m] = str.split(':').map(Number);
                                                                         return (h < 6 ? h + 24 : h) * 60 + m;
                                                                     };
-                                                                    const parts = seg.segmentId.replace('SEG_', '').split('_');
-                                                                    const segStartStr = parts[0] + ":00";
-                                                                    const segStart = parseTime(segStartStr);
+                                                                    const parts = seg.label 
+                                                                        ? seg.label.split(/[~～\-〜]/)[0]?.trim()
+                                                                        : seg.segmentId.replace('SEG_', '').split('_')[0] + ":00";
+                                                                    
+                                                                    const segStart = parseTime(parts);
                                                                     const aStart = parseTime(availData.startTime);
                                                                     const aEnd = parseTime(availData.endTime);
                                                                     if (aStart <= segStart && aEnd > segStart) {
@@ -200,7 +202,7 @@ export default function ShiftResultView(props: ShiftResultViewProps) {
                                                             }
 
                                                             return (
-                                                                <div key={seg.segmentId} className={`flex-1 flex items-center justify-center p-2 rounded-lg border text-[10px] font-black uppercase tracking-widest ${bgClass} ${textClass}`}>
+                                                                <div key={seg.segmentId} className={`flex-1 min-w-[100px] flex items-center justify-center p-2 rounded-lg border text-[10px] font-black uppercase tracking-widest ${bgClass} ${textClass}`}>
                                                                     {content}
                                                                 </div>
                                                             );
@@ -228,7 +230,7 @@ export default function ShiftResultView(props: ShiftResultViewProps) {
                                                     <Layers className="w-4 h-4 text-indigo-400" />
                                                 </div>
                                                 <h4 className="text-lg font-black italic uppercase tracking-tighter">
-                                                    {(seg.segmentId || '').replace('SEG_', '').replace('_', ':00 - ') + ':00'}
+                                                    {seg.label || (seg.segmentId || '').replace('SEG_', '').replace('_', ':00 - ') + ':00'}
                                                 </h4>
                                             </div>
                                             <div className="flex gap-6">

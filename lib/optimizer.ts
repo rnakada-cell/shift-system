@@ -113,6 +113,16 @@ export interface CastPairRule {
     penalty: number;
 }
 
+// 確定シフト（POSCONEで青バーなもの）
+// 最適化内で固定配置される
+export interface ConfirmedShiftEntry {
+    castId: string;       // Castマスタのid
+    castName: string;
+    date: string;         // YYYY-MM-DD
+    startTime: string;    // HH:MM
+    endTime: string;      // HH:MM
+    shopId?: string;
+}
 
 // Phase 2.5: 制約条件
 export type OptimizationConstraints = {
@@ -174,7 +184,10 @@ function calcBaseScore(
     const companionBonus = hasCompanion ? 30000 : 0;
     const dropInBonus = hasDropIn ? 20000 : 0;
 
-    let hourlyRevenuePotential = cast.hourlyRevenue || (cast.aiScore ? cast.aiScore * 10 : 0);
+    let hourlyRevenuePotential = cast.hourlyRevenue || (cast.aiScore ? cast.aiScore * 10 : cast.averageSales || 0);
+    if (hourlyRevenuePotential < 1000) {
+        hourlyRevenuePotential = (cast.aiScore ? cast.aiScore * 10 : (cast.averageSales && cast.averageSales > 1000 ? cast.averageSales : 15000)); 
+    }
 
     const d = new Date(date);
     const day = d.getDay();
@@ -222,12 +235,18 @@ function calcBaseScore(
 
     const expectedRevenue = Math.round(baseRevenue + companionBonus + dropInBonus);
     
-    // バック額の推定 (ランクに応じた還元率の適用)
-    let backRate = 0.12; // default
-    const r = cast.rank;
-    if (r === 'S' || r === 'A' || r === '1' || r === '2' || r === '3') backRate = 0.20;
-    else if (r === 'B' || r === '4' || r === '5') backRate = 0.15;
-    else if (r === '7' || r === '8') backRate = 0.08;
+    // バック額の推定 (手動入力データがある場合は優先)
+    let backRate = 0.12; // default fallback
+    const manualBackAvg = ((cast.drinkBackRate || 0) + (cast.chekiBackRate || 0)) / 2;
+    
+    if (manualBackAvg > 0) {
+        backRate = manualBackAvg;
+    } else {
+        const r = cast.rank;
+        if (r === 'S' || r === 'A' || r === '1' || r === '2' || r === '3') backRate = 0.20;
+        else if (r === 'B' || r === '4' || r === '5') backRate = 0.15;
+        else if (r === '7' || r === '8') backRate = 0.08;
+    }
     
     const projectedBackPay = expectedRevenue * backRate;
     const expectedCost = Math.round((cast.hourlyWage * segment.hours) + projectedBackPay);
@@ -270,7 +289,8 @@ function optimizeDay(
     constraints: OptimizationConstraints,
     pairRules: CastPairRule[] = [], 
     dayCapacities: DaySegmentCapacity[] = [],
-    scrapedData?: ScrapedData
+    scrapedData?: ScrapedData,
+    confirmedShifts: ConfirmedShiftEntry[] = []
 ): DailyResult {
 
     const segmentsResult: SegmentResult[] = [];
@@ -280,11 +300,29 @@ function optimizeDay(
     const assignedTodayCasts = new Set<string>();
     const castLastFloor = new Map<string, '1F' | '2F'>();
 
+    const toMin = (t: string) => { 
+        const [h, m] = t.split(':').map(Number); 
+        let adjustedH = h;
+        if (h >= 0 && h <= 5) adjustedH += 24;
+        return adjustedH * 60 + m; 
+    };
+
+    const todayConfirmed = confirmedShifts.filter(cs => cs.date === date);
+    const confirmedCastIds = new Set(todayConfirmed.map(cs => cs.castId));
+
+    todayConfirmed.forEach(cs => {
+        assignedTodayCasts.add(cs.castId);
+        const workedHours = Math.max(0, (toMin(cs.endTime) - toMin(cs.startTime)) / 60);
+        cumulativeHours.set(cs.castId, (cumulativeHours.get(cs.castId) || 0) + workedHours);
+    });
+
     for (const segment of segments) {
         const availableCandidates = availabilities
             .map(a => {
                 const dayAvail = a.availability.find(av => av.date === date);
                 if (!dayAvail) return null;
+
+                if (confirmedCastIds.has(a.castId)) return null;
 
                 const segAvail = dayAvail.segments?.find(s => (s as any).segmentId === segment.id);
 
@@ -296,8 +334,8 @@ function optimizeDay(
                         if (h >= 0 && h <= 5) adjustedH += 24;
                         return adjustedH * 60 + m;
                     };
-                    const segStart = segment.label.split(/[~～\-〜]/)[0]?.trim();
-                    if (segStart) {
+                    const segStart = segment.label.split(/[-〜~～]/)[0]?.trim();
+                    if (segStart && segStart.includes(':')) {
                         const sMin = toMinutes(segStart);
                         const startMin = toMinutes(dayAvail.startTime);
                         const endMin = toMinutes(dayAvail.endTime);
@@ -311,24 +349,33 @@ function optimizeDay(
                 if (!cast) return null;
 
                 const targetFloor = dayAvail.targetFloor || cast.floorPreference || 'ANY';
-                return { cast, segAvail: (segAvail as SegmentAvailability) || { segmentId: segment.id }, targetFloor };
+                return { cast, segAvail: (segAvail as SegmentAvailability) || { segmentId: segment.id }, targetFloor, isTimeMatch };
             })
-            .filter((item): item is { cast: Cast, segAvail: SegmentAvailability, targetFloor: string } => item !== null);
+            .filter((item): item is { cast: Cast, segAvail: SegmentAvailability, targetFloor: string, isTimeMatch: boolean } => item !== null);
 
         const isFirstSegment = segment === segments[0];
         const isLastSegment = segment === segments[segments.length - 1];
 
-        let candidates = availableCandidates.map(({ cast, segAvail, targetFloor }) => {
+        let candidates = availableCandidates.map(({ cast, segAvail, targetFloor, isTimeMatch }) => {
             const isVeteranRole = cast.rank === 'S' || cast.rank === 'A';
             const rookie = (cast.isRookie !== undefined) ? cast.isRookie : !isVeteranRole;
             const updatedCast = { ...cast, isRookie: rookie };
 
             const hasCompanion = !!segAvail.hasCompanion;
             const hasDropIn = !!segAvail.hasDropIn;
+            const isManuallyRequested = isTimeMatch || (!!segAvail && Object.keys(segAvail).length > 1);
 
             const { baseScore, expectedRevenue, expectedCost, detailedRationale } = calcBaseScore(updatedCast, segment, date, mode, weights, hasCompanion, hasDropIn, scrapedData);
 
             let score = baseScore;
+            
+            // 希望シフトへの強力なインセンティブ
+            if (isManuallyRequested) {
+                const requestBoost = 200000; // 圧倒的な加点
+                score += requestBoost;
+                detailedRationale.push({ type: 'request', value: requestBoost, label: '希望シフト優先加点' });
+            }
+
             if (isFirstSegment && updatedCast.canOpen) score += 50000;
             if (isLastSegment && updatedCast.canClose) score += 50000;
             const riskPenalty = updatedCast.absenceRate ? (updatedCast.absenceRate * 20000) : 0;
@@ -343,27 +390,83 @@ function optimizeDay(
                 expectedCost,
                 hasCompanion,
                 hasDropIn,
+                isManuallyRequested, // フラグ保持
                 assignedFloor: null as '1F' | '2F' | null,
-                rationale: "",
+                rationale: isManuallyRequested ? "本人希望" : "",
                 detailedRationale
             };
         });
 
-        const capacity = dayCapacities.find(c => c.date === date && c.segmentId === segment.id);
-        const MIN_1F = capacity?.min1F ?? 1;
-        const MAX_1F = capacity?.max1F ?? 9;
-        const MIN_2F = capacity?.min2F ?? 1;
-        const MAX_2F = capacity?.max2F ?? 8;
+        let currentRevenue = 0;
+        let currentCost = 0;
+        const assignedInSegment: typeof candidates = [];
+        const assignments: { castId: string; floor: '1F' | '2F'; notes: string }[] = [];
+        const assignedThisSegment: string[] = [];
+
+        const confirmedInSegment: typeof candidates = []; // 確定枠を追跡するためのリスト
+
+        // ── 確定シフトを先にセグメントにアサイン ──
+        const segStartMatch = segment.label.split(/[~～\-〜]/)[0]?.trim();
+        const sMin = segStartMatch ? toMin(segStartMatch) : 0;
+        
+        todayConfirmed.forEach(cs => {
+            const cast = casts.find(c => c.id === cs.castId);
+            if (!cast) return;
+
+            const startMin = toMin(cs.startTime);
+            const endMin = toMin(cs.endTime);
+            if (startMin <= sMin && endMin > sMin) {
+                const targetFloor: '1F' | '2F' = cs.shopId === 'room_of_love_point' ? '2F' : '1F';
+                
+                castLastFloor.set(cast.id, targetFloor);
+
+                const scoreRes = calcBaseScore(cast, segment, date, mode, weights, false, false, scrapedData);
+                
+                confirmedInSegment.push({
+                    cast,
+                    targetFloor,
+                    score: scoreRes.baseScore,
+                    baseScore: scoreRes.baseScore,
+                    expectedRevenue: scoreRes.expectedRevenue,
+                    expectedCost: scoreRes.expectedCost,
+                    hasCompanion: false,
+                    hasDropIn: false,
+                    isManuallyRequested: false,
+                    assignedFloor: targetFloor,
+                    rationale: 'POSCONE確定済',
+                    detailedRationale: scoreRes.detailedRationale
+                });
+            }
+        });
 
         const assignedFloor1: typeof candidates = [];
         const assignedFloor2: typeof candidates = [];
-        const assignedInSegment: typeof candidates = [];
         const unassignedReasons: { castId: string; reason: string }[] = [];
+
+        // フロアごとの定員枠
+        const dayCap = dayCapacities.find(dc => dc.date === date && dc.segmentId === segment.id);
+        const max1F = dayCap?.max1F ?? 999;
+        const max2F = dayCap?.max2F ?? 999;
+
+        // 確定枠で埋まっている分、AIの配置上限を減らす
+        const adjustedSegmentCapacity = Math.max(0, segment.maxCapacity - confirmedInSegment.length);
+        let aiAssignedCount = 0;
 
         while (candidates.length > 0) {
             candidates.sort((a, b) => b.score - a.score);
             const candidate = candidates.shift()!;
             const castId = candidate.cast.id;
+
+            // Phase 10: 本人希望または同期による希望がない人を勝手に入れないように制限（ノイズ防止）
+            if (!candidate.isManuallyRequested) {
+                unassignedReasons.push({ castId, reason: '本人希望なし' });
+                continue;
+            }
+
+            if (aiAssignedCount >= adjustedSegmentCapacity) {
+                unassignedReasons.push({ castId, reason: 'AI割当上限に到達' });
+                continue;
+            }
 
             if (cumulativeHours.get(castId)! + segment.hours > constraints.maxWeeklyHours) {
                 unassignedReasons.push({ castId, reason: `週最大労働時間超過` });
@@ -395,8 +498,8 @@ function optimizeDay(
                      (r.castNameB === candidate.cast.name && assignedList.some(a => a.cast.name === r.castNameA))));
             };
 
-            const can1 = assignedFloor1.length < MAX_1F && canAssignTo('1F');
-            const can2 = assignedFloor2.length < MAX_2F && canAssignTo('2F');
+            const can1 = assignedFloor1.length < max1F && canAssignTo('1F');
+            const can2 = assignedFloor2.length < max2F && canAssignTo('2F');
 
             // --- 制約適用: 未成年は1Fのみ ---
             if (candidate.cast.isUnderage) {
@@ -428,8 +531,11 @@ function optimizeDay(
                         if (p1 && can1) { assignedFloor = '1F'; floorRationale = "希望1F優先"; }
                         else if (p2 && can2) { assignedFloor = '2F'; floorRationale = "希望2F優先"; }
                         else {
-                            const isUnderMin = (assignedFloor1.length < MIN_1F) || (assignedFloor2.length < MIN_2F);
-                            if (mode === 'PROFIT_MAX' && (dynamicRevenue - candidate.expectedCost) < 0 && !isUnderMin) {
+                            const isUnderMin = false; // Phase 10: To simplify, skip min requirements for now
+                            const isRequested = (candidate as any).isManuallyRequested;
+                            
+                            // 希望が出ている場合は、赤字計算でも一旦入れる（店長の「希望を取り込む」意図を優先）
+                            if (mode === 'PROFIT_MAX' && (dynamicRevenue - candidate.expectedCost) < 0 && !isUnderMin && !isRequested) {
                                 unassignedReasons.push({ castId, reason: '需要不足による不採算' });
                                 continue;
                             }
@@ -457,6 +563,7 @@ function optimizeDay(
             if (assignedFloor === '1F') assignedFloor1.push(candidate);
             else assignedFloor2.push(candidate);
             assignedInSegment.push(candidate);
+            aiAssignedCount++;
             assignedTodayCasts.add(castId);
             castLastFloor.set(castId, assignedFloor);
             cumulativeHours.set(castId, (cumulativeHours.get(castId) || 0) + segment.hours);
@@ -489,10 +596,14 @@ function optimizeDay(
             finalAssigned = finalAssigned.filter(a => !a.cast.isRookie);
         }
 
+        // ── 確定シフトとAIアサインをマージ ──
         finalAssigned.forEach(a => {
             const fr = (a as any).floorRationale;
             if (fr) a.rationale = a.rationale ? `${a.rationale} | ${fr}` : fr;
         });
+
+        // 確定シフトを追加
+        finalAssigned.push(...confirmedInSegment);
 
         let actualSegRevenue = 0;
         finalAssigned.sort((a,b) => b.expectedRevenue - a.expectedRevenue).forEach((a, i) => {
@@ -552,7 +663,8 @@ export function optimizeShift(
     },
     dayCapacities: DaySegmentCapacity[] = [],  
     pairRules: CastPairRule[] = [],            
-    scrapedData?: ScrapedData
+    scrapedData?: ScrapedData,
+    confirmedShifts: ConfirmedShiftEntry[] = []
 ): OptimizationResult {
 
     const dailyResults: DailyResult[] = [];
@@ -569,7 +681,7 @@ export function optimizeShift(
         const dayResult = optimizeDay(
             date, casts, availabilities, segments, mode, weights,
             cumulativeHours, consecutiveDays, totalCostSoFar, constraints,
-            pairRules, dayCapacities, scrapedData
+            pairRules, dayCapacities, scrapedData, confirmedShifts
         );
         dailyResults.push(dayResult);
     }

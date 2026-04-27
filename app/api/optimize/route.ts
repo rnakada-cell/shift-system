@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { optimizeShift, OptimizationMode, OptimizationScope, CastAvailability, Cast as OptimizerCast } from '@/lib/optimizer';
+import { optimizeShift, OptimizationMode, OptimizationScope, CastAvailability, Cast as OptimizerCast, ConfirmedShiftEntry } from '@/lib/optimizer';
 import { getDateRange } from '@/lib/utils';
 import prisma from '@/lib/db';
 import { getCastPerformance, getStoreTrends, getDemandTrends } from '@/lib/analysis';
@@ -53,12 +53,35 @@ async function handleOptimization(body: any) {
             }
         });
 
+        // DBから確定シフト（POSCONEの青バー）を取得
+        const dbConfirmedShifts = await (prisma as any).confirmedShift.findMany({
+            where: { date: { in: dates } }
+        });
+
         // DBから基本設定（時間帯など）を取得
         const settings = await prisma.storeSetting.findUnique({
             where: { id: 'main-store' }
         });
         if (!settings) throw new Error('Store settings not found');
-        const rawSegments = settings.defaultSegments as any[];
+        let rawSegments = settings.defaultSegments as any[];
+        
+        // Phase 10: 14:00枠が欠落している場合の自動補完
+        if (!rawSegments || rawSegments.length < 5) {
+            console.log("Segment count in DB low or empty, injecting default expanded segments (14:00-06:00).");
+            rawSegments = [
+                { id: 'SEG_14_16', label: '14:00 - 16:00', hours: 2, demandFactor: 0.6, maxCapacity: 17 },
+                { id: 'SEG_16_18', label: '16:00 - 18:00', hours: 2, demandFactor: 0.8, maxCapacity: 17 },
+                { id: 'SEG_18_20', label: '18:00 - 20:00', hours: 2, demandFactor: 1.0, maxCapacity: 17 },
+                { id: 'SEG_20_22', label: '20:00 - 22:00', hours: 2, demandFactor: 1.3, maxCapacity: 17 },
+                { id: 'SEG_22_24', label: '22:00 - 24:00', hours: 2, demandFactor: 1.1, maxCapacity: 17 },
+                { id: 'SEG_00_02', label: '00:00 - 02:00', hours: 2, demandFactor: 0.9, maxCapacity: 12 },
+                { id: 'SEG_02_04', label: '02:00 - 04:00', hours: 2, demandFactor: 0.7, maxCapacity: 8 },
+                { id: 'SEG_04_06', label: '04:00 - 06:00', hours: 2, demandFactor: 0.5, maxCapacity: 8 },
+            ];
+        }
+        
+        console.log(`Optimization starting with ${rawSegments.length} segments.`);
+        
         const timeSegments = rawSegments.map(s => {
             // "18:00 - 20:00" のようなラベルから時間を推測（なければ2hとする）
             let fallbackHours = 2;
@@ -77,7 +100,15 @@ async function handleOptimization(body: any) {
                 demandFactor: Number(s.demandFactor) || 1.0,
                 maxCapacity: Number(s.maxCapacity) || 4,
             };
+        }).sort((a, b) => {
+            const getStart = (lbl: string) => {
+                const h = parseInt(lbl.split(':')[0]);
+                return h < 6 ? h + 24 : h;
+            };
+            return getStart(a.label) - getStart(b.label);
         });
+        
+        console.log('Processed segments:', timeSegments.map(s => s.label).join(', '));
 
         // DBデータをオプティマイザ用のフォーマット (CastAvailability[]) に変換
         const availabilityMap = new Map<string, any>();
@@ -209,6 +240,20 @@ async function handleOptimization(body: any) {
             demandTrends
         };
 
+        // 確定シフトをオプティマイザ用のフォーマットに変換
+        const confirmedShiftEntries: ConfirmedShiftEntry[] = dbConfirmedShifts
+            .filter((cs: any) => cs.castId) // castId が紐付いているものだけ
+            .map((cs: any) => ({
+                castId: cs.castId,
+                castName: cs.castName,
+                date: cs.date,
+                startTime: cs.startTime,
+                endTime: cs.endTime,
+                shopId: cs.shopId,
+            }));
+
+        console.log(`Confirmed shifts (locked): ${confirmedShiftEntries.length}`);
+
         console.time('optimizer_core');
         const result = optimizeShift(
             dates,
@@ -221,7 +266,8 @@ async function handleOptimization(body: any) {
             constraints,
             dayCapacities,
             pairRules,
-            scrapedData
+            scrapedData,
+            confirmedShiftEntries
         );
 
         console.timeEnd('optimizer_core');
