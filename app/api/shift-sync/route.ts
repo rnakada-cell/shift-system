@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/db';
-import { PosconeClient, ShopId } from '@/lib/poscone';
+import { PosconeClient, ShopId, normalizeName } from '@/lib/poscone';
 
 /**
  * POST /api/shift-sync
@@ -94,7 +94,16 @@ export async function POST(request: Request) {
 
     // キャストマスタをキャッシュ
     const allCasts = await prisma.cast.findMany({ where: { isActive: true } });
-    const castByName = new Map(allCasts.map(c => [c.name, c]));
+    
+    // マッチング関数: 名前とエイリアスの両方でマッチング
+    const findCast = (scrapedName: string) => {
+      const normalizedScraped = normalizeName(scrapedName);
+      return allCasts.find(c => {
+        const normalizedBase = normalizeName(c.name);
+        const normalizedAliases = (c.aliases as string[] || []).map((a: string) => normalizeName(a));
+        return normalizedBase === normalizedScraped || normalizedAliases.includes(normalizedScraped);
+      });
+    };
 
     // ── データのクリーニング ──
     // 同期対象日の既存データを一旦おそうじする（リセット後のクリーンな状態にするため）
@@ -114,57 +123,50 @@ export async function POST(request: Request) {
     }
 
     for (const shift of shifts) {
-      const cast = castByName.get(shift.castName);
+      // ⑤ 確定シフトは除外 (希望シフトのみ取得)
+      if (shift.type !== 'requested') continue;
 
-      if (shift.type === 'requested') {
-        // 緑バー(希望) → Availability に upsert
-        if (!cast) {
-          console.warn(`[shift-sync] Cast not found for name: ${shift.castName}`);
-          skippedCount++;
-          continue;
-        }
+      const cast = findCast(shift.castName);
+      const rawName = shift.castName;
+      const normalized = normalizeName(rawName);
+      const matched = cast ? cast.name : 'NOT_FOUND';
 
-        await prisma.availability.upsert({
-          where: { castId_date: { castId: cast.id, date: shift.date } },
-          update: { startTime: shift.startTime, endTime: shift.endTime },
-          create: {
-            castId: cast.id,
-            date: shift.date,
-            startTime: shift.startTime,
-            endTime: shift.endTime,
-            segments: [],
-          },
-        });
-        requestedCount++;
+      // ④ ログ出力: rawName / normalized / matched
+      console.log(`[shift-sync] Scraped: "${rawName}" / Norm: "${normalized}" / Match: "${matched}"`);
 
-      } else if (shift.type === 'confirmed') {
-        // 青バー(確定) → ConfirmedShift に upsert
-        const castId = cast?.id ?? undefined;
-        await (prisma as any).confirmedShift.upsert({
-          where: {
-            castName_date_shopId: {
-              castName: shift.castName,
-              date: shift.date,
-              shopId,
-            },
-          },
-          update: {
-            startTime: shift.startTime,
-            endTime: shift.endTime,
-            castId: castId ?? null,
-          },
-          create: {
-            castName: shift.castName,
-            castId: castId ?? null,
-            date: shift.date,
-            startTime: shift.startTime,
-            endTime: shift.endTime,
-            shopId,
-            source: 'POSCONE',
-          },
-        });
-        confirmedCount++;
+      if (!cast) {
+        console.warn(`[shift-sync] Cast not found for: ${rawName}`);
+        skippedCount++;
+        continue;
       }
+
+      // ⑤ source: EXTERNAL_FORM_REQUEST で保存
+      // ShiftRequest に記録を残す（名前はPOSCONEのものをそのまま保存）
+      await prisma.shiftRequest.create({
+        data: {
+          castName: rawName, // POSCONEの表記をそのまま反映
+          castId: cast.id,   // 内部的な紐付け
+          date: shift.date,
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          source: 'EXTERNAL_FORM_REQUEST',
+          status: 'approved',
+        }
+      });
+
+      // ⑥ AI入力制御 - Availabilityには希望シフトのみ流す
+      await prisma.availability.upsert({
+        where: { castId_date: { castId: cast.id, date: shift.date } },
+        update: { startTime: shift.startTime, endTime: shift.endTime },
+        create: {
+          castId: cast.id,
+          date: shift.date,
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          segments: [],
+        },
+      });
+      requestedCount++;
     }
 
     return NextResponse.json({

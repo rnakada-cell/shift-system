@@ -32,6 +32,7 @@ model Cast {
   isUnderage        Boolean?         @default(false)
   lineId            String?
   isActive          Boolean?         @default(true)
+  aliases           String[]         @default([])
   joinedDate        DateTime?        @default(now())
   attendances       CastAttendance[]
   castScores        CastScore[]

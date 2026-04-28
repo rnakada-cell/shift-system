@@ -77,6 +77,29 @@ export interface ShiftEntry {
   date: string;      // "YYYY-MM-DD"
 }
 
+/** カタカナをひらがなに変換 */
+function katakanaToHiragana(src: string): string {
+  return src.replace(/[\u30A1-\u30F6]/g, (match) => {
+    const chr = match.charCodeAt(0) - 0x60;
+    return String.fromCharCode(chr);
+  });
+}
+
+/** 名前を正規化（空白・全角スペース・大文字小文字・カタカナを統一） */
+export function normalizeName(name: string): string {
+  if (!name) return '';
+  let clean = name
+    .replace(/[　\s]/g, '') // 全ての空白（全角・半角）を排除
+    .replace(/[（\(\)）]/g, '') // カッコを削除
+    .replace(/新人|ゲスト|内勤|1F|2F/g, '') // 共通のノイズワードを削除
+    .toLowerCase();
+  
+  // カタカナをひらがなに統一
+  clean = katakanaToHiragana(clean);
+  
+  return clean;
+}
+
 /** 商品名からカテゴリを推定 */
 function guessCategory(itemName: string): string {
   const name = itemName.toLowerCase();
@@ -568,20 +591,27 @@ export class PosconeClient {
     const $ = cheerio.load(html);
     const results: ShiftEntry[] = [];
 
-    // ── ヘッダー行から「列インデックス → 日付」マッピングを作成 ──
-    // ヘッダーセルのテキスト例: "1 Wed7人" → 1日
+    // ── ヘッダー行を特定 ──
     const colDateMap: Map<number, string> = new Map();
-    const headerCells = $('table tr').first().find('td, th');
-    headerCells.each((colIdx, cell) => {
-      const text = $(cell).text().trim();
-      const dayMatch = text.match(/^(\d{1,2})\s/);
-      if (dayMatch) {
-        const day = parseInt(dayMatch[1], 10);
-        if (!filterDay || day === filterDay) {
-          const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          colDateMap.set(colIdx, dateStr);
+    let headerRowFound = false;
+
+    $('table tr').each((_, tr) => {
+      if (headerRowFound) return;
+      const cells = $(tr).find('td, th');
+      cells.each((colIdx, cell) => {
+        const text = $(cell).text().trim();
+        // 数字で始まるパターンを広く許容（"1", "1(Wed)", "1 Wed" など）
+        const dayMatch = text.match(/^(\d{1,2})/);
+        if (dayMatch) {
+          headerRowFound = true;
+          const day = parseInt(dayMatch[1], 10);
+          if (!filterDay || day === filterDay) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            colDateMap.set(colIdx, dateStr);
+            console.log(`[POSCONE] Found date column: col=${colIdx}, date=${dateStr}, header="${text}"`);
+          }
         }
-      }
+      });
     });
 
     if (colDateMap.size === 0) {
@@ -595,53 +625,66 @@ export class PosconeClient {
     
     rows.each((rowIdx, tr) => {
       const cells = $(tr).find('td, th');
-      if (cells.length < colDateMap.size) return;
+      if (cells.length < 2) return; // 少なくとも名前と1日分は必要
 
-      // 1列目または2列目から名前を取得（設定によって入れ替わることがあるため）
-      let staffName = '';
-      const cell0 = cells.eq(0).text().trim();
-      const cell1 = cells.eq(1).text().trim();
+      // リンク(<a>)の中身もチェックする
+      const getVal = (el: any) => {
+        const link = $(el).find('a').first();
+        return (link.length ? link.text() : $(el).text()).trim();
+      };
+
+      const val0 = getVal(cells.eq(0));
+      const val1 = getVal(cells.eq(1));
       
-      if (cell0 && cell0 !== 'スタッフ名' && cell0 !== '日付' && cell0 !== '合計' && !/^[0-9\/]+$/.test(cell0)) {
-          staffName = cell0;
-      } else if (cell1 && cell1 !== '合計' && !/^[0-9\/]+$/.test(cell1)) {
-          staffName = cell1;
+      let staffName = '';
+      const isTime = (s: string) => /\d{1,2}:\d{2}/.test(s);
+      
+      // cell1が名前であることが多いため優先的にチェック
+      if (val1 && !isTime(val1) && !/^[0-9\/]+$/.test(val1) && !val1.includes('合計') && val1 !== 'スタッフ名') {
+        staffName = val1;
+      } else if (val0 && !isTime(val0) && !/^[0-9\/]+$/.test(val0) && val0 !== 'スタッフ名' && !val0.includes('合計')) {
+        staffName = val0;
       }
 
       // スタッフ名が取れない or Summary行的なものはスキップ
       if (!staffName || staffName === 'スタッフ名' || staffName.includes('計')) return;
+      
+      console.log(`[POSCONE] Found row for staff: "${staffName}" (cells: ${cells.length})`);
 
       colDateMap.forEach((dateStr, colIdx) => {
         const cell = cells.eq(colIdx);
         if (cell.length === 0) return;
 
-        const btn = cell.find('[class*="btn"]').first();
-        if (!btn.length) return;
+        const buttons = cell.find('[class*="btn"]');
+        if (buttons.length === 0) return;
 
-        const btnClass = btn.attr('class') || '';
-        const btnText = btn.text().trim();
+        buttons.each((_, btnEl) => {
+          const btn = $(btnEl);
+          const btnClass = btn.attr('class') || '';
+          const btnText = btn.text().trim();
 
-        // 時間パターン: "15:00~23:00" or "15:00～23:00"
-        const timeMatch = btnText.match(/(\d{1,2}:\d{2})[~～\-〜](\d{1,2}:\d{2})/);
-        if (!timeMatch) return;
+          // 時間パターン: "15:00~23:00" or "15:00～23:00"
+          const timeMatch = btnText.match(/(\d{1,2}:\d{2})[~～\-〜](\d{1,2}:\d{2})/);
+          if (!timeMatch) return;
 
-        let type: ShiftType;
-        if (btnClass.includes('btn-gradient-success')) {
-          type = 'requested';
-        } else if (btnClass.includes('btn-gradient-dark') || btnClass.includes('btn-gradient-indigo') || btnClass.includes('bg-dark')) {
-          type = 'confirmed';
-        } else {
-          type = 'exception';
-        }
+          let type: ShiftType;
+          if (btnClass.includes('btn-gradient-success')) {
+            type = 'requested';
+          } else if (btnClass.includes('btn-gradient-dark') || btnClass.includes('btn-gradient-indigo') || btnClass.includes('bg-dark') || btnClass.includes('btn-gradient-info')) {
+            type = 'confirmed';
+          } else {
+            type = 'exception';
+          }
 
-        console.log(`[POSCONE] Found ${type} shift for ${staffName} on ${dateStr}: ${timeMatch[1]} - ${timeMatch[2]}`);
+          console.log(`[POSCONE] Found ${type} shift for ${staffName} on ${dateStr}: ${timeMatch[1]} - ${timeMatch[2]}`);
 
-        results.push({
-          type,
-          castName: staffName,
-          startTime: timeMatch[1],
-          endTime: timeMatch[2],
-          date: dateStr,
+          results.push({
+            type,
+            castName: staffName,
+            startTime: timeMatch[1],
+            endTime: timeMatch[2],
+            date: dateStr,
+          });
         });
       });
     });
