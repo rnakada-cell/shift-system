@@ -67,16 +67,15 @@ async function handleOptimization(body: any) {
         
         // Phase 10: 14:00枠が欠落している場合の自動補完
         if (!rawSegments || rawSegments.length < 5) {
-            console.log("Segment count in DB low or empty, injecting default expanded segments (14:00-06:00).");
+            console.log("Segment count in DB low or empty, injecting default expanded segments (11:00-01:00).");
             rawSegments = [
-                { id: 'SEG_14_16', label: '14:00 - 16:00', hours: 2, demandFactor: 0.6, maxCapacity: 17 },
-                { id: 'SEG_16_18', label: '16:00 - 18:00', hours: 2, demandFactor: 0.8, maxCapacity: 17 },
-                { id: 'SEG_18_20', label: '18:00 - 20:00', hours: 2, demandFactor: 1.0, maxCapacity: 17 },
-                { id: 'SEG_20_22', label: '20:00 - 22:00', hours: 2, demandFactor: 1.3, maxCapacity: 17 },
-                { id: 'SEG_22_24', label: '22:00 - 24:00', hours: 2, demandFactor: 1.1, maxCapacity: 17 },
-                { id: 'SEG_00_02', label: '00:00 - 02:00', hours: 2, demandFactor: 0.9, maxCapacity: 12 },
-                { id: 'SEG_02_04', label: '02:00 - 04:00', hours: 2, demandFactor: 0.7, maxCapacity: 8 },
-                { id: 'SEG_04_06', label: '04:00 - 06:00', hours: 2, demandFactor: 0.5, maxCapacity: 8 },
+                { id: 'SEG_11_13', label: '11:00 - 13:00', hours: 2, demandFactor: 0.5, maxCapacity: 10 },
+                { id: 'SEG_13_15', label: '13:00 - 15:00', hours: 2, demandFactor: 0.7, maxCapacity: 12 },
+                { id: 'SEG_15_17', label: '15:00 - 17:00', hours: 2, demandFactor: 0.8, maxCapacity: 15 },
+                { id: 'SEG_17_19', label: '17:00 - 19:00', hours: 2, demandFactor: 1.0, maxCapacity: 17 },
+                { id: 'SEG_19_21', label: '19:00 - 21:00', hours: 2, demandFactor: 1.3, maxCapacity: 20 },
+                { id: 'SEG_21_23', label: '21:00 - 23:00', hours: 2, demandFactor: 1.2, maxCapacity: 17 },
+                { id: 'SEG_23_01', label: '23:00 - 01:00', hours: 2, demandFactor: 0.9, maxCapacity: 12 },
             ];
         }
         

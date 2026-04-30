@@ -123,16 +123,12 @@ export async function POST(request: Request) {
     }
 
     for (const shift of shifts) {
-      // ⑤ 確定シフトは除外 (希望シフトのみ取得)
-      if (shift.type !== 'requested') continue;
-
-      const cast = findCast(shift.castName);
       const rawName = shift.castName;
       const normalized = normalizeName(rawName);
+      const cast = findCast(rawName);
       const matched = cast ? cast.name : 'NOT_FOUND';
 
-      // ④ ログ出力: rawName / normalized / matched
-      console.log(`[shift-sync] Scraped: "${rawName}" / Norm: "${normalized}" / Match: "${matched}"`);
+      console.log(`[shift-sync] Scraped: "${rawName}" / Norm: "${normalized}" / Type: ${shift.type} / Match: ${matched}`);
 
       if (!cast) {
         console.warn(`[shift-sync] Cast not found for: ${rawName}`);
@@ -140,33 +136,60 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // ⑤ source: EXTERNAL_FORM_REQUEST で保存
-      // ShiftRequest に記録を残す（名前はPOSCONEのものをそのまま保存）
-      await prisma.shiftRequest.create({
-        data: {
-          castName: rawName, // POSCONEの表記をそのまま反映
-          castId: cast.id,   // 内部的な紐付け
-          date: shift.date,
-          startTime: shift.startTime,
-          endTime: shift.endTime,
-          source: 'EXTERNAL_FORM_REQUEST',
-          status: 'approved',
-        }
-      });
+      if (shift.type === 'confirmed') {
+        // 確定シフト（青バー）は ConfirmedShift テーブルに保存
+        await (prisma as any).confirmedShift.upsert({
+          where: { 
+            castName_date_shopId: { 
+              castName: cast.name, 
+              date: shift.date, 
+              shopId: shopId 
+            } 
+          },
+          update: { 
+            startTime: shift.startTime, 
+            endTime: shift.endTime,
+            castId: cast.id,
+            source: 'POSCONE'
+          },
+          create: {
+            castName: cast.name,
+            castId: cast.id,
+            date: shift.date,
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            shopId: shopId,
+            source: 'POSCONE'
+          }
+        });
+        confirmedCount++;
+      } else if (shift.type === 'requested') {
+        // 希望シフト（緑バー）は ShiftRequest と Availability に保存
+        await prisma.shiftRequest.create({
+          data: {
+            castName: rawName,
+            castId: cast.id,
+            date: shift.date,
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            source: 'EXTERNAL_FORM_REQUEST',
+            status: 'approved',
+          }
+        });
 
-      // ⑥ AI入力制御 - Availabilityには希望シフトのみ流す
-      await prisma.availability.upsert({
-        where: { castId_date: { castId: cast.id, date: shift.date } },
-        update: { startTime: shift.startTime, endTime: shift.endTime },
-        create: {
-          castId: cast.id,
-          date: shift.date,
-          startTime: shift.startTime,
-          endTime: shift.endTime,
-          segments: [],
-        },
-      });
-      requestedCount++;
+        await prisma.availability.upsert({
+          where: { castId_date: { castId: cast.id, date: shift.date } },
+          update: { startTime: shift.startTime, endTime: shift.endTime },
+          create: {
+            castId: cast.id,
+            date: shift.date,
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            segments: [],
+          }
+        });
+        requestedCount++;
+      }
     }
 
     return NextResponse.json({

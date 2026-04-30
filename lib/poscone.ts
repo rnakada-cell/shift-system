@@ -638,12 +638,22 @@ export class PosconeClient {
       
       let staffName = '';
       const isTime = (s: string) => /\d{1,2}:\d{2}/.test(s);
+
+      const isNotName = (s: string) => {
+        return !s || 
+               isTime(s) || 
+               /^[0-9\/\.%]+$/.test(s) || // 数字、スラッシュ、点、パーセントのみは除外
+               s.includes('%') || 
+               s.includes('合計') || 
+               s === 'スタッフ名' ||
+               s.length > 20;
+      };
       
-      // cell1が名前であることが多いため優先的にチェック
-      if (val1 && !isTime(val1) && !/^[0-9\/]+$/.test(val1) && !val1.includes('合計') && val1 !== 'スタッフ名') {
-        staffName = val1;
-      } else if (val0 && !isTime(val0) && !/^[0-9\/]+$/.test(val0) && val0 !== 'スタッフ名' && !val0.includes('合計')) {
+      // cell0 (通常ここが名前) を優先し、ダメならcell1をチェック
+      if (!isNotName(val0)) {
         staffName = val0;
+      } else if (!isNotName(val1)) {
+        staffName = val1;
       }
 
       // スタッフ名が取れない or Summary行的なものはスキップ
