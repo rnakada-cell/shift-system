@@ -66,15 +66,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'POSCONE login failed. Check credentials.' }, { status: 401 });
     }
 
-    // シフト一覧をスクレイプ（月全体のデータを取得してからフィルタする）
-    // fetchShiftListの第4引数(filterDay)は渡さない
-    const allShifts = await client.fetchShiftList(shopId, year, month);
-
-    // Filter
-    const shifts = allShifts.filter(s => {
-      const d = parseInt(s.date.split('-')[2], 10);
-      return filterFunc(d);
-    });
+    let shifts: any[] = [];
+    if (filterDay) {
+      shifts = await client.fetchDailyShiftList(shopId, year, month, filterDay);
+    } else {
+      shifts = await client.fetchShiftList(shopId, year, month);
+      shifts = shifts.filter(s => {
+        const d = parseInt(s.date.split('-')[2], 10);
+        return filterFunc(d);
+      });
+    }
 
     if (shifts.length === 0) {
       return NextResponse.json({

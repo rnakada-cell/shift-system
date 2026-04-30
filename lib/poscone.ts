@@ -702,4 +702,60 @@ export class PosconeClient {
     console.log(`[POSCONE] fetchShiftList: ${results.length} entries for ${shopId} ${year}/${month}${filterDay ? '/' + filterDay : ''}`);
     return results;
   }
+
+  /**
+   * 日次スケジュール一覧を取得
+   */
+  async fetchDailyShiftList(shopId: ShopId, year: number, month: number, day: number): Promise<PosconeShift[]> {
+    const shop = SHOP_PARAM[shopId];
+    const url = `${POSCONE_BASE}/schedule_itiran_day.php?year=${year}&month=${month}&day=${day}&shop=${shop}`;
+    console.log(`[POSCONE] Fetching daily shifts from: ${url}`);
+    
+    const html = await this.fetchHtml(url);
+    const $ = cheerio.load(html);
+    
+    const results: PosconeShift[] = [];
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+    const rows = $('table tr');
+    rows.each((i, tr) => {
+      const cells = $(tr).find('td, th');
+      if (cells.length < 2) return;
+
+      const getVal = (el: any) => {
+        const link = $(el).find('a').first();
+        return (link.length ? link.text() : $(el).text()).trim();
+      };
+
+      const rawName = getVal(cells.eq(0));
+      const timeBox = getVal(cells.eq(1));
+
+      if (!rawName || rawName === 'スタッフ名' || rawName.includes('計')) return;
+      
+      // 時間パターン: "11:00-18:00" or "11:00~18:00"
+      const timeMatch = timeBox.match(/(\d{1,2}:\d{2})[~～\-〜](\d{1,2}:\d{2})/);
+      if (!timeMatch) return;
+
+      // デイリービューの色分け判定 (styleのbackground-colorを見る)
+      // #80C5EC = 青 (確定), #B5FFB5 = 緑 (希望)
+      let type: ShiftType = 'requested';
+      const rowHtml = $(tr).html() || '';
+      if (rowHtml.includes('#80C5EC') || rowHtml.includes('btn-gradient-dark')) {
+        type = 'confirmed';
+      } else if (rowHtml.includes('#B5FFB5') || rowHtml.includes('btn-gradient-success')) {
+        type = 'requested';
+      }
+
+      results.push({
+        type,
+        castName: rawName,
+        startTime: timeMatch[1],
+        endTime: timeMatch[2],
+        date: dateStr,
+      });
+    });
+
+    console.log(`[POSCONE] Found ${results.length} shifts in daily view.`);
+    return results;
+  }
 }
